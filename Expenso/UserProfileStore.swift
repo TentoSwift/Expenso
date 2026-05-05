@@ -108,41 +108,65 @@ final class UserProfileStore: ObservableObject {
 
     // MARK: - Self Member sync (for paidBy resolution in Private sheets)
 
-    /// Settings 編集後に呼ぶ。selfMemberID に対応する Member を更新し、
-    /// 自分が払った Private ストアの過去支出の paidBy も追従更新する。
-    func applyToSelfMember(in ctx: NSManagedObjectContext) {
-        let resolvedID: UUID
-        if let id = selfMemberID {
-            resolvedID = id
-        } else {
-            resolvedID = UUID()
-            selfMemberID = resolvedID
+    /// 自分の Member を CK userRecordName で検索する。同一アカウントの全デバイスで一致。
+    /// recordName が無い場合は selfMemberID (UserDefaults) → name の順でフォールバック。
+    private func findOrCreateSelfMember(in ctx: NSManagedObjectContext) -> Member? {
+        // 1) recordName 一致 (cross-device 安定)
+        if let rn = userRecordName, !rn.isEmpty {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "recordName == %@", rn)
+            req.fetchLimit = 1
+            if let m = (try? ctx.fetch(req))?.first {
+                return m
+            }
         }
+        // 2) selfMemberID 一致 (legacy / 同端末内で一意)
+        if let id = selfMemberID {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            req.fetchLimit = 1
+            if let m = (try? ctx.fetch(req))?.first {
+                return m
+            }
+        }
+        // 3) name 一致 (旧スキーマからの移行)
+        if !displayName.isEmpty {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "name == %@", resolvedDisplayName)
+            req.sortDescriptors = [NSSortDescriptor(keyPath: \Member.createdAt, ascending: true)]
+            req.fetchLimit = 1
+            if let m = (try? ctx.fetch(req))?.first {
+                return m
+            }
+        }
+        return nil
+    }
 
-        let req = NSFetchRequest<Member>(entityName: "Member")
-        req.predicate = NSPredicate(format: "id == %@", resolvedID as CVarArg)
-        req.fetchLimit = 1
+    /// Settings 編集後に呼ぶ。自分の Member を更新 (無ければ作成)し、
+    /// 自分が払った Private ストアの過去支出の paidBy も追従更新する。
+    /// 識別子: Member.recordName (= userRecordName) を主、id (UUID) を副。
+    func applyToSelfMember(in ctx: NSManagedObjectContext) {
         let member: Member
         let oldName: String?
-        if let existing = (try? ctx.fetch(req))?.first {
+
+        if let existing = findOrCreateSelfMember(in: ctx) {
             member = existing
             oldName = existing.name
         } else {
-            let nameReq = NSFetchRequest<Member>(entityName: "Member")
-            nameReq.predicate = NSPredicate(format: "name == %@", resolvedDisplayName)
-            nameReq.sortDescriptors = [NSSortDescriptor(keyPath: \Member.createdAt, ascending: true)]
-            nameReq.fetchLimit = 1
-            if let nameMatch = (try? ctx.fetch(nameReq))?.first {
-                member = nameMatch
-                member.id = resolvedID
-                oldName = nameMatch.name
-            } else {
-                member = Member(context: ctx)
-                member.id = resolvedID
-                member.createdAt = .now
-                member.sortOrder = 0
-                oldName = nil
-            }
+            member = Member(context: ctx)
+            member.id = UUID()
+            member.createdAt = .now
+            member.sortOrder = 0
+            oldName = nil
+        }
+
+        // recordName を必ず埋める (cross-device 識別キー)
+        if let rn = userRecordName, !rn.isEmpty {
+            member.recordName = rn
+        }
+        // selfMemberID キャッシュも合わせる
+        if let mid = member.id {
+            selfMemberID = mid
         }
 
         let newName = resolvedDisplayName
@@ -155,6 +179,34 @@ final class UserProfileStore: ObservableObject {
         }
 
         try? ctx.save()
+    }
+
+    /// CloudKit 同期で来た自分の Member の値をローカル (UserDefaults / photo file) に取り込む。
+    /// 同一アカウントの別デバイスで初回起動した時に、設定済プロフィールを引き継ぐ用途。
+    func syncFromSelfMember(in ctx: NSManagedObjectContext) {
+        guard let member = findOrCreateSelfMember(in: ctx) else { return }
+
+        // selfMemberID をこの Member の id に合わせる (id ベース解決のため)
+        if let mid = member.id, mid != selfMemberID {
+            selfMemberID = mid
+        }
+        // ローカルが空なら Member の値を採用
+        if displayName.isEmpty, let n = member.name, !n.isEmpty {
+            displayName = n
+        }
+        if (avatarBgColorHex == nil || avatarBgColorHex?.isEmpty == true),
+           let c = member.colorHex, !c.isEmpty {
+            avatarBgColorHex = c
+        }
+        if photoData == nil, let p = member.photoData {
+            photoData = p
+        }
+        // recordName が未設定なら今のうちに埋める (CloudKit から来た古い Member が対象)
+        if (member.recordName ?? "").isEmpty,
+           let rn = userRecordName, !rn.isEmpty {
+            member.recordName = rn
+            try? ctx.save()
+        }
     }
 
     private func renamePaidByInPrivateStore(from old: String, to new: String, in ctx: NSManagedObjectContext) {

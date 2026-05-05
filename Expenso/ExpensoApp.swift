@@ -57,7 +57,11 @@ struct ExpensoApp: App {
                     await PurchaseManager.shared.refreshEntitlements()
                     await FXRatesService.shared.refreshIfStale()
                     await UserProfileStore.shared.ensureUserRecordNameLoaded()
-                    UserProfileStore.shared.propagateProfile(in: persistenceController.container.viewContext)
+                    let ctx = persistenceController.container.viewContext
+                    // CloudKit 同期で来た自分の Member の値をローカルに取り込む
+                    // (= 同一アカウント別デバイスでプロフィールを引き継ぐ)
+                    UserProfileStore.shared.syncFromSelfMember(in: ctx)
+                    UserProfileStore.shared.propagateProfile(in: ctx)
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     // フォアグラウンド復帰時にも entitlement を再確認。
