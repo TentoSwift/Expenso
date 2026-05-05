@@ -60,15 +60,26 @@ extension Expense {
         return sign + formattedAmount
     }
 
+    /// `category` リレーションが nil でも、`categoryRaw` (名前) とシートのカテゴリ集合から
+    /// 一致するものを引いて返すフォールバック付きアクセサ。
+    /// Shared/Private のクロスストアで linkage が外れたケースでも、表示が正しく出るようにする。
+    var resolvedCategory: ExpenseCategory? {
+        if let c = category { return c }
+        guard let raw = categoryRaw, !raw.isEmpty,
+              let sheet = sheet,
+              let cats = sheet.categories as? Set<ExpenseCategory> else { return nil }
+        return cats.first(where: { $0.name == raw })
+    }
+
     var categoryDisplayName: String {
-        category?.displayName ?? (categoryRaw?.isEmpty == false ? categoryRaw! : "未分類")
+        resolvedCategory?.displayName ?? (categoryRaw?.isEmpty == false ? categoryRaw! : "未分類")
     }
 
     var categoryTint: Color {
-        category?.tint ?? .gray
+        resolvedCategory?.tint ?? .gray
     }
 
     var categorySymbol: String {
-        category?.displaySymbol ?? "ellipsis.circle"
+        resolvedCategory?.displaySymbol ?? "ellipsis.circle"
     }
 }

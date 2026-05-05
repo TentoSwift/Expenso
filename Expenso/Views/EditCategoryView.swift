@@ -175,7 +175,17 @@ struct EditCategoryView: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         switch mode {
         case .create(let record):
+            let pc = PersistenceController.shared
+            let coord = pc.container.persistentStoreCoordinator
+            let sheetStore = coord.persistentStore(for: record.objectID.uriRepresentation())
+
             let cat = ExpenseCategory(context: viewContext)
+            // 親シートと同じストアに先に割り当てる (Shared シート対応)。
+            // 順序が逆だとクロスストア関係でリレーション設定が失敗する。
+            if let store = sheetStore {
+                viewContext.assign(cat, to: store)
+            }
+
             cat.id = UUID()
             cat.name = trimmed
             cat.colorHex = selectedColor
@@ -184,7 +194,7 @@ struct EditCategoryView: View {
             cat.createdAt = .now
             cat.sortOrder = nextSortOrder(in: record)
             cat.sheet = record
-            PersistenceController.shared.save()
+            pc.save()
             Haptics.success()
             onSave?(cat)
         case .edit(let category):

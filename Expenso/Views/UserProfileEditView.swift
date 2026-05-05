@@ -174,7 +174,15 @@ private struct MemojiEditorSheet: View {
     @State private var animationTrigger: Int = 0
     @State private var keyboardFocusTrigger: Bool = false
 
+    // Memoji の拡大/移動: 確定値 (state) と進行中値 (gesture) を分けて持つ
+    @State private var imageScale: CGFloat = 1.0
+    @State private var imageOffset: CGSize = .zero
+    @GestureState private var gestureScale: CGFloat = 1.0
+    @GestureState private var gestureDrag: CGSize = .zero
+
     private let baseImageSize: CGFloat = 180
+    private let minScale: CGFloat = 0.4
+    private let maxScale: CGFloat = 4.0
     private let presetColors: [Color] = [
         Color(hex: "#FF6B6B")!, Color(hex: "#FF9F43")!,
         Color(hex: "#FECA57")!, Color(hex: "#48DBFB")!,
@@ -186,12 +194,13 @@ private struct MemojiEditorSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 16) {
                     avatarPreview
                         .padding(.top, 20)
-                    Text(memojiImage == nil ? "中央をタップしてミー文字を選択" : "背景色を選んでください")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    instructionText
+                    if memojiImage != nil {
+                        resetButton
+                    }
                     colorPickerRow
                     Spacer()
                 }
@@ -215,19 +224,64 @@ private struct MemojiEditorSheet: View {
         }
     }
 
+    private var instructionText: some View {
+        Text(memojiImage == nil
+             ? "中央をタップしてミー文字を選択"
+             : "ピンチで拡大、ドラッグで位置調整できます")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var resetButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                imageScale = 1.0
+                imageOffset = .zero
+            }
+        } label: {
+            Label("位置とサイズをリセット", systemImage: "arrow.counterclockwise")
+                .font(.caption)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
     private var avatarPreview: some View {
         ZStack {
             Circle()
                 .fill(bgColor.gradient)
                 .frame(width: 260, height: 260)
             if let img = memojiImage {
+                let currentScale = imageScale * gestureScale
+                let currentOffset = CGSize(
+                    width: imageOffset.width + gestureDrag.width,
+                    height: imageOffset.height + gestureDrag.height
+                )
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: baseImageSize, height: baseImageSize)
+                    .frame(width: baseImageSize * currentScale, height: baseImageSize * currentScale)
+                    .offset(currentOffset)
                     .id(animationTrigger)
                     .transition(.scale.combined(with: .opacity))
                     .animation(.spring(response: 0.35, dampingFraction: 0.6), value: animationTrigger)
+                    .gesture(
+                        MagnificationGesture()
+                            .updating($gestureScale) { value, state, _ in state = value }
+                            .onEnded { value in
+                                imageScale = max(minScale, min(imageScale * value, maxScale))
+                            }
+                            .simultaneously(with:
+                                DragGesture(minimumDistance: 4)
+                                    .updating($gestureDrag) { value, state, _ in state = value.translation }
+                                    .onEnded { value in
+                                        imageOffset = CGSize(
+                                            width: imageOffset.width + value.translation.width,
+                                            height: imageOffset.height + value.translation.height
+                                        )
+                                    }
+                            )
+                    )
             }
             TransparentMemojiRepresentable(
                 image: $memojiImage,
@@ -235,14 +289,24 @@ private struct MemojiEditorSheet: View {
                 autoFocus: memojiImage == nil,
                 focusTrigger: keyboardFocusTrigger
             ) { _, _ in
+                // 新しい Memoji が来たら拡大/位置をリセット
+                imageScale = 1.0
+                imageOffset = .zero
                 animationTrigger += 1
             }
             .frame(width: 260, height: 260)
             .clipShape(Circle())
+            // 画像未選択 (= まだ Memoji が無い) 間だけ MemojiView 側のヒットを許可。
+            // 選択後はジェスチャを画像側に通す。
             .allowsHitTesting(memojiImage == nil)
             .contentShape(Circle())
-            .onTapGesture { keyboardFocusTrigger.toggle() }
+            .onTapGesture {
+                if memojiImage == nil {
+                    keyboardFocusTrigger.toggle()
+                }
+            }
         }
+        .clipShape(Circle())
     }
 
     private var colorPickerRow: some View {
@@ -271,15 +335,18 @@ private struct MemojiEditorSheet: View {
 
     private func confirm() {
         guard let src = memojiImage else { return }
+        // ユーザーのジェスチャ確定値 (imageScale / imageOffset) を反映して描画 → JPEG 化
         let snapshot = ZStack {
             Circle().fill(bgColor.gradient)
                 .frame(width: 300, height: 300)
             Image(uiImage: src)
                 .resizable()
                 .scaledToFit()
-                .frame(width: baseImageSize, height: baseImageSize)
+                .frame(width: baseImageSize * imageScale, height: baseImageSize * imageScale)
+                .offset(imageOffset)
         }
         .frame(width: 300, height: 300)
+        .clipShape(Circle())
         let renderer = ImageRenderer(content: snapshot)
         renderer.scale = 3.0
         guard let uiImage = renderer.uiImage else { return }
