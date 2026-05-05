@@ -64,6 +64,16 @@ extension Expense {
         return (try? ctx.fetch(req))?.first
     }
 
+    /// `generatedFromRuleID` から元の RecurringRule を引く (定期から生成された支出のみ非 nil)。
+    var relatedRule: RecurringRule? {
+        guard let id = generatedFromRuleID else { return nil }
+        let ctx = managedObjectContext ?? PersistenceController.shared.container.viewContext
+        let req = NSFetchRequest<RecurringRule>(entityName: "RecurringRule")
+        req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        req.fetchLimit = 1
+        return (try? ctx.fetch(req))?.first
+    }
+
     /// 同シート配下の ParticipantProfile を引く。recordName 一致 → displayName 一致の順。
     var resolvedParticipantProfile: ParticipantProfile? {
         guard let sheet = sheet,
