@@ -60,6 +60,8 @@ struct ExpensoApp: App {
                     let ctx = persistenceController.container.viewContext
                     UserProfileStore.shared.syncFromSelfMember(in: ctx)
                     UserProfileStore.shared.propagateProfile(in: ctx)
+                    // 定期項目の未生成 occurrence を Expense に展開
+                    RecurringExpenseGenerator.generateAll(in: ctx)
                 }
                 // CloudKit が新しいデータを取り込んだら自分の Member も再 sync して
                 // ローカルのプロフィール (UserProfileStore) を最新に保つ
@@ -68,10 +70,11 @@ struct ExpensoApp: App {
                     UserProfileStore.shared.syncFromSelfMember(in: ctx)
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    // フォアグラウンド復帰時にも entitlement を再確認。
-                    // (購読期限切れの伝播や、共有解除のリトライをここでも走らせる)
                     if newPhase == .active {
+                        // 再前面化で entitlement 再確認 + 定期項目の生成チェック
                         Task { await PurchaseManager.shared.refreshEntitlements() }
+                        let ctx = persistenceController.container.viewContext
+                        RecurringExpenseGenerator.generateAll(in: ctx)
                     }
                 }
         }

@@ -153,6 +153,11 @@ struct SheetDetailView: View {
                     } label: {
                         Label("カテゴリを管理", systemImage: "tag.fill")
                     }
+                    NavigationLink {
+                        RecurringListView(record: record)
+                    } label: {
+                        Label("定期項目", systemImage: "repeat")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -595,9 +600,16 @@ private struct ExpenseRowView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(expense.formattedSignedAmount)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    if expense.generatedFromRuleID != nil {
+                        Image(systemName: "repeat")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(expense.formattedSignedAmount)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.primary)
+                }
                 if expense.resolvedCurrencyCode != (expense.sheet?.resolvedDefaultCurrencyCode ?? "JPY") {
                     Text(expense.resolvedCurrencyCode)
                         .font(.caption2)
