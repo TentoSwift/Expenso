@@ -326,6 +326,7 @@ struct AddExpenseView: View {
             expense.currencyCode = currencyCode
             expense.categoryRaw = selectedCategory?.name
             expense.paidBy = selectedPayer?.name
+            expense.payerProfileID = selectedPayer?.profileID
             expense.date = date
             expense.note = note
             expense.createdAt = .now
@@ -345,6 +346,7 @@ struct AddExpenseView: View {
             expense.currencyCode = currencyCode
             expense.categoryRaw = selectedCategory?.name
             expense.paidBy = selectedPayer?.name
+            expense.payerProfileID = selectedPayer?.profileID
             expense.date = date
             expense.note = note
 

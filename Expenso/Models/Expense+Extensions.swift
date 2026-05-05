@@ -9,16 +9,29 @@ import SwiftUI
 
 extension Expense {
     var displayTitle: String { title ?? "" }
-    var displayPaidBy: String { resolvedPayer?.displayName ?? (paidBy ?? "") }
-    var payerTint: Color { resolvedPayer?.tint ?? .secondary }
-    /// Avatar 用: 解決できた Member の写真 (なければ nil → AvatarView がイニシャル文字で fallback)
-    var payerPhotoData: Data? { resolvedPayer?.photoData }
+    /// 表示名: 解決できた Profile の現在名 → ParticipantProfile の現在名 → 保存時の paidBy の順で fallback
+    @MainActor
+    var displayPaidBy: String {
+        if let n = resolvedPayer?.displayName, !n.isEmpty { return n }
+        if let n = resolvedParticipantProfile?.displayName, !n.isEmpty { return n }
+        return paidBy ?? ""
+    }
+    @MainActor
+    var payerTint: Color {
+        resolvedPayer?.tint
+            ?? Color(hex: resolvedParticipantProfile?.displayColorHex ?? "")
+            ?? .secondary
+    }
+    /// Avatar 用: 解決できた Member / ParticipantProfile の写真
+    @MainActor
+    var payerPhotoData: Data? {
+        resolvedPayer?.photoData ?? resolvedParticipantProfile?.photoData
+    }
 
-    /// `paidBy` の名前と一致するローカル `Member` を返す。Member は Private ストアのみに存在するため、
-    /// Shared ストアの Expense (他人のシート) では nil を返し、その場合は `resolvedParticipantProfile`
-    /// 経由で同期されたプロフィールから引く。
+    /// `payerProfileID` (= Member.profileID) で Member を引く。Private ストアのみに存在。
+    /// ID で見つからなければ `paidBy` 名前一致にフォールバック (旧データ向け)。
+    @MainActor
     var resolvedPayer: Member? {
-        guard let name = paidBy, !name.isEmpty else { return nil }
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
         if !objectID.isTemporaryID,
@@ -26,19 +39,42 @@ extension Expense {
            store == pc.sharedStore {
             return nil
         }
+        // 1) ID 一致 (UUID)
+        if let pid = payerProfileID, !pid.isEmpty,
+           let uuid = UUID(uuidString: pid) {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "id == %@", uuid as CVarArg)
+            req.fetchLimit = 1
+            if let m = (try? ctx.fetch(req))?.first { return m }
+        }
+        // 2) ID 一致 (CK recordName == 自分の selfMember)
+        if let pid = payerProfileID, !pid.isEmpty,
+           let rn = UserProfileStore.shared.userRecordName, rn == pid,
+           let selfID = UserProfileStore.shared.selfMemberID {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "id == %@", selfID as CVarArg)
+            req.fetchLimit = 1
+            if let m = (try? ctx.fetch(req))?.first { return m }
+        }
+        // 3) 名前一致 (旧データ移行用)
+        guard let name = paidBy, !name.isEmpty else { return nil }
         let req = NSFetchRequest<Member>(entityName: "Member")
         req.predicate = NSPredicate(format: "name == %@", name)
         req.fetchLimit = 1
         return (try? ctx.fetch(req))?.first
     }
 
-    /// 同じシート配下の `ParticipantProfile` のうち、displayName が paidBy と一致するものを返す。
-    /// Shared ストアの Expense (= 他アカウントが書いた支出) の表示用に使う。
-    /// CloudKit Sharing 経由で同期されたプロフィール (写真・色) を引き出せる。
+    /// 同シート配下の ParticipantProfile を引く。recordName 一致 → displayName 一致の順。
     var resolvedParticipantProfile: ParticipantProfile? {
-        guard let name = paidBy, !name.isEmpty,
-              let sheet = sheet,
+        guard let sheet = sheet,
               let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        // 1) recordName 一致
+        if let pid = payerProfileID, !pid.isEmpty,
+           let pp = profiles.first(where: { $0.recordName == pid }) {
+            return pp
+        }
+        // 2) displayName 一致 (旧データ移行用)
+        guard let name = paidBy, !name.isEmpty else { return nil }
         return profiles.first(where: { $0.displayName == name })
     }
 

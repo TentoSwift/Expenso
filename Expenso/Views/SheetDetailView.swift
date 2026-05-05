@@ -387,6 +387,7 @@ struct SheetDetailView: View {
         copy.currencyCode = expense.currencyCode
         copy.categoryRaw = expense.categoryRaw
         copy.paidBy = expense.paidBy
+        copy.payerProfileID = expense.payerProfileID
         copy.date = .now
         copy.note = expense.note
         copy.createdAt = .now
@@ -570,20 +571,21 @@ private struct ExpenseRowView: View {
                     .foregroundStyle(.primary)
                 if showSubtitle {
                     HStack(spacing: 6) {
-                        if let paidBy = expense.paidBy, !paidBy.isEmpty {
+                        let displayName = expense.displayPaidBy
+                        if !displayName.isEmpty {
                             PayerAvatar(
                                 member: expense.resolvedPayer,
                                 participantProfile: expense.resolvedParticipantProfile,
-                                fallbackName: paidBy,
+                                fallbackName: displayName,
                                 fallbackColorHex: "#8E8E93",
                                 fallbackPhoto: nil,
                                 size: 16
                             )
-                            Text(paidBy)
+                            Text(displayName)
                                 .foregroundStyle(expense.payerTint)
                         }
                         if let note = expense.note, !note.isEmpty {
-                            if !(expense.paidBy?.isEmpty ?? true) { Text("·").foregroundStyle(.secondary) }
+                            if !displayName.isEmpty { Text("·").foregroundStyle(.secondary) }
                             Text(note)
                                 .lineLimit(1)
                                 .foregroundStyle(.secondary)
