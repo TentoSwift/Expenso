@@ -28,17 +28,13 @@ extension Expense {
         resolvedPayer?.photoData ?? resolvedParticipantProfile?.photoData
     }
 
-    /// `payerProfileID` (= Member.profileID) で Member を引く。Private ストアのみに存在。
-    /// ID で見つからなければ `paidBy` 名前一致にフォールバック (旧データ向け)。
+    /// `payerProfileID` (= Member.profileID) で Member を引く。Member は Private ストアにしか
+    /// 存在しないが、ID/名前一致で見つかれば Shared ストアの Expense でも返す
+    /// (= 自分が払った共有支出を編集するときに支払者が解決できるように)。
     @MainActor
     var resolvedPayer: Member? {
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
-        if !objectID.isTemporaryID,
-           let store = objectID.persistentStore,
-           store == pc.sharedStore {
-            return nil
-        }
         // 1) ID 一致 (UUID)
         if let pid = payerProfileID, !pid.isEmpty,
            let uuid = UUID(uuidString: pid) {

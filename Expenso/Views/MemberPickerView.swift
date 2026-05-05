@@ -11,6 +11,10 @@ struct MemberPickerView: View {
     @Binding var selected: Member?
     /// 渡されたら、シートのオーナー + 参加者だけを表示する。nil なら自分のみ。
     let record: ExpenseSheet?
+    /// 編集中の支出から渡される、保存済みの paidBy / payerProfileID。
+    /// `selected` が nil でもこれと一致する行に「✓」を付けるための補助情報。
+    let fallbackPaidBy: String?
+    let fallbackProfileID: String?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
@@ -26,9 +30,14 @@ struct MemberPickerView: View {
         animation: .default
     ) private var allMembers: FetchedResults<Member>
 
-    init(selected: Binding<Member?>, record: ExpenseSheet? = nil) {
+    init(selected: Binding<Member?>,
+         record: ExpenseSheet? = nil,
+         fallbackPaidBy: String? = nil,
+         fallbackProfileID: String? = nil) {
         self._selected = selected
         self.record = record
+        self.fallbackPaidBy = fallbackPaidBy
+        self.fallbackProfileID = fallbackProfileID
     }
 
     /// 自分の Member (UserProfileStore.selfMemberID または displayName 一致)
@@ -93,6 +102,21 @@ struct MemberPickerView: View {
         }
     }
 
+    /// 自分が選択中かを Member objectID + fallback 情報の両方で判定する。
+    private func selfRowIsSelected(_ me: Member) -> Bool {
+        if selected?.objectID == me.objectID { return true }
+        // selected が nil でも、編集中の元 paidBy / profileID と一致すれば自分にチェック
+        guard selected == nil else { return false }
+        if let pid = fallbackProfileID, !pid.isEmpty,
+           let rn = profile.userRecordName, !rn.isEmpty, pid == rn {
+            return true
+        }
+        if let name = fallbackPaidBy, !name.isEmpty, name == me.name {
+            return true
+        }
+        return false
+    }
+
     /// 既存 Member があればそれを観測ベースで描画。無ければ UserProfileStore から直接表示し、
     /// タップで Member を ensure (作成 or 更新) してから selected に設定。
     @ViewBuilder
@@ -106,7 +130,7 @@ struct MemberPickerView: View {
                     selfRowContent(
                         avatar: AnyView(ObservedMemberAvatar(member: me, size: 36)),
                         name: me.displayName,
-                        isSelected: selected?.objectID == me.objectID
+                        isSelected: selfRowIsSelected(me)
                     )
                 }
                 .buttonStyle(.plain)
@@ -168,10 +192,25 @@ struct MemberPickerView: View {
         }
     }
 
+    private func participantRowIsSelected(_ p: CKShare.Participant, info: ParticipantInfo) -> Bool {
+        if let s = selected, s.name == info.name { return true }
+        guard selected == nil else { return false }
+        // recordName 一致
+        if let pid = fallbackProfileID, !pid.isEmpty,
+           let rn = p.userIdentity.userRecordID?.recordName, rn == pid {
+            return true
+        }
+        // 名前一致 (paidBy)
+        if let name = fallbackPaidBy, !name.isEmpty, name == info.name {
+            return true
+        }
+        return false
+    }
+
     @ViewBuilder
     private func participantRow(_ p: CKShare.Participant) -> some View {
         let info = participantDisplayInfo(p)
-        let isSelected = selected?.name == info.name
+        let isSelected = participantRowIsSelected(p, info: info)
         Button {
             selectFromParticipant(info)
         } label: {

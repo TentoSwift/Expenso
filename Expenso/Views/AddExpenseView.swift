@@ -75,6 +75,57 @@ struct AddExpenseView: View {
         amountDecimal != nil && !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// 編集モードで Member 解決ができなかった場合に表示する名前 (保存済みの paidBy)。
+    /// 新規作成時は nil で fallback としてプロフィール表示にする。
+    private var payerFallbackName: String? {
+        if case .edit(let expense) = mode {
+            let n = expense.paidBy ?? ""
+            return n.isEmpty ? nil : n
+        }
+        return nil
+    }
+
+    private var payerFallbackProfileID: String? {
+        if case .edit(let expense) = mode {
+            let p = expense.payerProfileID ?? ""
+            return p.isEmpty ? nil : p
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var payerPreview: some View {
+        if let m = selectedPayer {
+            ObservedMemberAvatar(member: m, size: 24)
+            Text(m.displayName).foregroundStyle(.secondary)
+        } else if let name = payerFallbackName {
+            // 編集モードで Member 解決できなかった時: 保存済みの paidBy + ParticipantProfile
+            // (= 共有相手が支払者になっている支出をローカル Member 無しで正しく表示)
+            if case .edit(let expense) = mode {
+                PayerAvatar(
+                    member: nil,
+                    participantProfile: expense.resolvedParticipantProfile,
+                    fallbackName: name,
+                    fallbackColorHex: "#8E8E93",
+                    fallbackPhoto: nil,
+                    size: 24
+                )
+            } else {
+                AvatarView(name: name, colorHex: "#8E8E93", photoData: nil, size: 24)
+            }
+            Text(name).foregroundStyle(.secondary)
+        } else {
+            // 新規作成 + 未選択: 自分のプロフィールをデフォルト候補として表示
+            AvatarView(
+                photoData: profile.photoData,
+                displayName: profile.resolvedDisplayName,
+                colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
+                size: 24
+            )
+            Text(profile.resolvedDisplayName).foregroundStyle(.secondary)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -173,26 +224,17 @@ struct AddExpenseView: View {
 
                 Section("支払者") {
                     NavigationLink {
-                        MemberPickerView(selected: $selectedPayer, record: contextSheet)
+                        MemberPickerView(
+                            selected: $selectedPayer,
+                            record: contextSheet,
+                            fallbackPaidBy: payerFallbackName,
+                            fallbackProfileID: payerFallbackProfileID
+                        )
                     } label: {
                         HStack {
                             Text("支払者")
                             Spacer()
-                            if let m = selectedPayer {
-                                ObservedMemberAvatar(member: m, size: 24)
-                                Text(m.displayName)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                // selectedPayer が未確定でも、登録済みのプロフィールがあれば自分として表示
-                                AvatarView(
-                                    photoData: profile.photoData,
-                                    displayName: profile.resolvedDisplayName,
-                                    colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
-                                    size: 24
-                                )
-                                Text(profile.resolvedDisplayName)
-                                    .foregroundStyle(.secondary)
-                            }
+                            payerPreview
                         }
                     }
                 }
