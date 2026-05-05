@@ -323,8 +323,7 @@ struct AddExpenseView: View {
 
             // 親シートと同じストアに先に割り当ててから関係を設定する。順序が逆だと
             // クロスストア関係エラーで save が失敗する。
-            let coordinator = pc.container.persistentStoreCoordinator
-            let sheetStore = coordinator.persistentStore(for: record.objectID.uriRepresentation())
+            let sheetStore = record.objectID.persistentStore
             if let store = sheetStore {
                 viewContext.assign(expense, to: store)
             }
@@ -343,7 +342,7 @@ struct AddExpenseView: View {
             expense.sheet = record
             // category は Expense と同じストア (= sheet と同じストア) に居る前提でのみ紐付ける
             if let cat = selectedCategory,
-               coordinator.persistentStore(for: cat.objectID.uriRepresentation()) == sheetStore {
+               cat.objectID.persistentStore == sheetStore {
                 expense.category = cat
             }
             // 自分の ParticipantProfile を同シートに ensure (まだ無ければ作成、あれば更新)
@@ -359,10 +358,9 @@ struct AddExpenseView: View {
             expense.date = date
             expense.note = note
 
-            let coord = pc.container.persistentStoreCoordinator
-            let expStore = coord.persistentStore(for: expense.objectID.uriRepresentation())
+            let expStore = expense.objectID.persistentStore
             if let cat = selectedCategory,
-               coord.persistentStore(for: cat.objectID.uriRepresentation()) == expStore {
+               cat.objectID.persistentStore == expStore {
                 expense.category = cat
             } else {
                 expense.category = nil

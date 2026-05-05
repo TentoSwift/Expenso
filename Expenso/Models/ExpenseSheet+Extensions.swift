@@ -25,7 +25,7 @@ extension ExpenseSheet {
     var isOwnedByCurrentUser: Bool {
         let pc = PersistenceController.shared
         guard let privateStore = pc.privateStore,
-              let currentStore = pc.container.persistentStoreCoordinator.persistentStore(for: objectID.uriRepresentation()) else {
+              let currentStore = objectID.persistentStore else {
             return true // 判定できなければ所有者扱い (新規作成時など)
         }
         return currentStore == privateStore

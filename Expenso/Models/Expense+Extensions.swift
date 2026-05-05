@@ -35,7 +35,7 @@ extension Expense {
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
         if !objectID.isTemporaryID,
-           let store = ctx.persistentStoreCoordinator?.persistentStore(for: objectID.uriRepresentation()),
+           let store = objectID.persistentStore,
            store == pc.sharedStore {
             return nil
         }

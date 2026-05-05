@@ -176,8 +176,7 @@ struct EditCategoryView: View {
         switch mode {
         case .create(let record):
             let pc = PersistenceController.shared
-            let coord = pc.container.persistentStoreCoordinator
-            let sheetStore = coord.persistentStore(for: record.objectID.uriRepresentation())
+            let sheetStore = record.objectID.persistentStore
 
             let cat = ExpenseCategory(context: viewContext)
             // 親シートと同じストアに先に割り当てる (Shared シート対応)。

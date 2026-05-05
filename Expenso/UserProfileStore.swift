@@ -159,16 +159,14 @@ final class UserProfileStore: ObservableObject {
 
     private func renamePaidByInPrivateStore(from old: String, to new: String, in ctx: NSManagedObjectContext) {
         let pc = PersistenceController.shared
-        guard let coord = ctx.persistentStoreCoordinator,
-              let privateStore = pc.privateStore else { return }
+        guard let privateStore = pc.privateStore else { return }
 
         let req = NSFetchRequest<Expense>(entityName: "Expense")
         req.predicate = NSPredicate(format: "paidBy == %@", old)
         guard let expenses = try? ctx.fetch(req), !expenses.isEmpty else { return }
 
         for e in expenses {
-            guard let store = coord.persistentStore(for: e.objectID.uriRepresentation()),
-                  store == privateStore else { continue }
+            guard let store = e.objectID.persistentStore, store == privateStore else { continue }
             e.paidBy = new
         }
     }
@@ -186,9 +184,6 @@ final class UserProfileStore: ObservableObject {
     func propagateProfile(in ctx: NSManagedObjectContext) {
         guard let recordName = userRecordName, !recordName.isEmpty else { return }
 
-        let pc = PersistenceController.shared
-        guard let coord = ctx.persistentStoreCoordinator else { return }
-
         let sheetReq = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
         guard let sheets = try? ctx.fetch(sheetReq) else { return }
 
@@ -197,10 +192,10 @@ final class UserProfileStore: ObservableObject {
         let newColor = avatarBgColorHex ?? "#5B8DEF"
 
         for sheet in sheets {
-            // どのストアに居るかを取得 (Private なら自分のシート、Shared なら参加シート)
-            guard let sheetStore = coord.persistentStore(for: sheet.objectID.uriRepresentation()) else { continue }
+            // NSManagedObjectID.persistentStore で直接取る
+            // (coord.persistentStore(for:) はファイル URL 用なので uriRepresentation を渡しても nil)
+            guard let sheetStore = sheet.objectID.persistentStore else { continue }
 
-            // 既存の自分のプロフィールを探す
             let existing: ParticipantProfile? = (sheet.participantProfiles as? Set<ParticipantProfile>)?
                 .first(where: { $0.recordName == recordName })
 
@@ -209,7 +204,7 @@ final class UserProfileStore: ObservableObject {
                 profile = existing
             } else {
                 profile = ParticipantProfile(context: ctx)
-                ctx.assign(profile, to: sheetStore) // 親シートと同じストアに割り当て
+                ctx.assign(profile, to: sheetStore)
                 profile.recordName = recordName
                 profile.sheet = sheet
             }
@@ -225,9 +220,7 @@ final class UserProfileStore: ObservableObject {
     /// 1 シートだけプロフィールを書き込む (支出追加時など、特定シートだけ更新する用途)。
     func ensureProfile(in sheet: ExpenseSheet, ctx: NSManagedObjectContext) {
         guard let recordName = userRecordName, !recordName.isEmpty else { return }
-        let pc = PersistenceController.shared
-        guard let coord = ctx.persistentStoreCoordinator,
-              let sheetStore = coord.persistentStore(for: sheet.objectID.uriRepresentation()) else { return }
+        guard let sheetStore = sheet.objectID.persistentStore else { return }
 
         let existing = (sheet.participantProfiles as? Set<ParticipantProfile>)?
             .first(where: { $0.recordName == recordName })

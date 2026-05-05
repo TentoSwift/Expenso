@@ -371,11 +371,8 @@ struct SheetDetailView: View {
         let copy = Expense(context: viewContext)
 
         // 1) 親シートと同じストアに先に割り当てる
-        let coord = pc.container.persistentStoreCoordinator
         let parentSheet = expense.sheet
-        let parentStore: NSPersistentStore? = parentSheet.flatMap {
-            coord.persistentStore(for: $0.objectID.uriRepresentation())
-        }
+        let parentStore: NSPersistentStore? = parentSheet?.objectID.persistentStore
         if let store = parentStore {
             viewContext.assign(copy, to: store)
         }
@@ -395,7 +392,7 @@ struct SheetDetailView: View {
         // 3) 関係 (同一ストア内のみ)
         copy.sheet = parentSheet
         if let cat = expense.category,
-           coord.persistentStore(for: cat.objectID.uriRepresentation()) == parentStore {
+           cat.objectID.persistentStore == parentStore {
             copy.category = cat
         }
         pc.save()
