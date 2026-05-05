@@ -353,7 +353,7 @@ struct StatsView: View {
 
     private var payerBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("支払者別")
+            Text("\(selectedKind.partyLabel)別")
                 .font(.headline)
             ForEach(byPayer) { item in
                 HStack {

@@ -11,6 +11,8 @@ struct MemberPickerView: View {
     @Binding var selected: Member?
     /// 渡されたら、シートのオーナー + 参加者だけを表示する。nil なら自分のみ。
     let record: ExpenseSheet?
+    /// 「支払」「受取」を切り替えるための種別 (タイトル等に使う)。
+    let kind: TransactionKind
     /// 編集中の支出から渡される、保存済みの paidBy / payerProfileID。
     /// `selected` が nil でもこれと一致する行に「✓」を付けるための補助情報。
     let fallbackPaidBy: String?
@@ -32,10 +34,12 @@ struct MemberPickerView: View {
 
     init(selected: Binding<Member?>,
          record: ExpenseSheet? = nil,
+         kind: TransactionKind = .expense,
          fallbackPaidBy: String? = nil,
          fallbackProfileID: String? = nil) {
         self._selected = selected
         self.record = record
+        self.kind = kind
         self.fallbackPaidBy = fallbackPaidBy
         self.fallbackProfileID = fallbackProfileID
     }
@@ -65,7 +69,7 @@ struct MemberPickerView: View {
             selfFromProfileSection
             if !otherParticipants.isEmpty { otherParticipantsSection }
         }
-        .navigationTitle("支払者を選択")
+        .navigationTitle(kind.partySelectionTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: record?.objectID) {
             await loadShare()
@@ -187,7 +191,7 @@ struct MemberPickerView: View {
         } header: {
             Text("シートのメンバー")
         } footer: {
-            Text("支払者として記録できるのはこのシートのオーナーと参加者のみです。")
+            Text("\(kind.partyLabel)として記録できるのはこのシートのオーナーと参加者のみです。")
                 .font(.caption2)
         }
     }

@@ -142,12 +142,12 @@ struct EditRecurringRuleView: View {
                     }
                 }
 
-                Section("支払者") {
+                Section(kind.partyLabel) {
                     NavigationLink {
-                        MemberPickerView(selected: $selectedPayer, record: contextSheet)
+                        MemberPickerView(selected: $selectedPayer, record: contextSheet, kind: kind)
                     } label: {
                         HStack {
-                            Text("支払者")
+                            Text(kind.partyLabel)
                             Spacer()
                             if let m = selectedPayer {
                                 ObservedMemberAvatar(member: m, size: 24)

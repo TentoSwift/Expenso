@@ -232,17 +232,18 @@ struct AddExpenseView: View {
                     }
                 }
 
-                Section("支払者") {
+                Section(kind.partyLabel) {
                     NavigationLink {
                         MemberPickerView(
                             selected: $selectedPayer,
                             record: contextSheet,
+                            kind: kind,
                             fallbackPaidBy: payerFallbackName,
                             fallbackProfileID: payerFallbackProfileID
                         )
                     } label: {
                         HStack {
-                            Text("支払者")
+                            Text(kind.partyLabel)
                             Spacer()
                             payerPreview
                         }
