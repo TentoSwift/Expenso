@@ -153,10 +153,12 @@ struct UserProfileEditView: View {
         profile.photoData        = draftPhotoData
         profile.avatarBgColorHex = draftBgColorHex
         profile.applyToSelfMember(in: viewContext)
-        Haptics.success()
-        Task {
-            await profile.saveToCloudKit()
+        // CloudKit Sharing 経由で共有相手にも反映するため、各シートの ParticipantProfile も更新
+        Task { @MainActor in
+            await profile.ensureUserRecordNameLoaded()
+            profile.propagateProfile(in: viewContext)
         }
+        Haptics.success()
         dismiss()
     }
 }

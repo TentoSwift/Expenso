@@ -266,39 +266,26 @@ struct CloudSharingView: View {
         if !displayed.isEmpty {
             Section {
                 ForEach(Array(displayed.enumerated()), id: \.offset) { _, participant in
-                    ParticipantRow(participant: participant, isOwnerView: isOwner) { permission in
+                    ParticipantRow(
+                        participant: participant,
+                        sheet: record,
+                        isOwnerView: isOwner
+                    ) { permission in
                         await update(participant: participant, share: share, to: permission)
                     } onRemove: {
                         await removeParticipant(participant, from: share)
                     }
                 }
             } header: {
-                HStack {
-                    Text("参加者")
-                    Spacer()
-                    Button {
-                        Task { await fetchAllParticipantProfiles(share) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                }
+                Text("参加者")
             }
             .id(participantsRefresh)
-            .task(id: share.url) {
-                await fetchAllParticipantProfiles(share)
-            }
         }
     }
 
     private func fetchAllParticipantProfiles(_ share: CKShare) async {
-        let recordNames = share.participants
-            .filter { $0.acceptanceStatus != .pending }
-            .compactMap { $0.userIdentity.userRecordID?.recordName }
-            .filter { !$0.isEmpty && $0 != "_defaultOwner_" && $0 != "__defaultOwner__" }
-        guard !recordNames.isEmpty else { return }
-        await RemoteProfileCache.shared.fetch(recordNames) // 強制再取得
+        // ParticipantProfile は Core Data + CloudKit Sharing 経由で自動同期されるため、
+        // 明示的なプロフェッチは不要 (互換のため空実装で残す)。
     }
 
     private var inviteSection: some View {
@@ -524,11 +511,10 @@ struct CloudSharingView: View {
 
 private struct ParticipantRow: View {
     let participant: CKShare.Participant
+    @ObservedObject var sheet: ExpenseSheet
     var isOwnerView: Bool = true
     let onPermissionChange: (CKShare.ParticipantPermission) async -> Void
     let onRemove: () async -> Void
-
-    @ObservedObject private var cache = RemoteProfileCache.shared
 
     private var recordName: String? {
         guard let rn = participant.userIdentity.userRecordID?.recordName,
@@ -542,9 +528,11 @@ private struct ParticipantRow: View {
         participant.userIdentity.lookupInfo?.emailAddress
     }
 
-    private var cachedProfile: RemoteProfileCache.CachedProfile? {
-        guard let rn = recordName else { return nil }
-        return cache.profile(for: rn)
+    /// このシート配下に居る、この participant に対応する ParticipantProfile を引く。
+    private var participantProfile: ParticipantProfile? {
+        guard let rn = recordName,
+              let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        return profiles.first(where: { $0.recordName == rn })
     }
 
     private var isAccepted: Bool {
@@ -552,11 +540,9 @@ private struct ParticipantRow: View {
     }
 
     private var primaryText: String {
-        // 参加済みは Public DB のプロフィール表示名を最優先
-        if isAccepted, let cached = cachedProfile, let n = cached.displayName, !n.isEmpty {
+        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return n
         }
-        // 招待中はメールアドレス
         if participant.acceptanceStatus == .pending, let email = emailAddress {
             return email
         }
@@ -571,19 +557,18 @@ private struct ParticipantRow: View {
     }
 
     private var secondaryText: String? {
-        // 参加済みでプロフィール取得済み: メールアドレスを補助情報として表示
-        if isAccepted, cachedProfile?.displayName?.isEmpty == false {
+        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return emailAddress
         }
         return nil
     }
 
     private var avatarColorHex: String {
-        if isAccepted, let cached = cachedProfile, let hex = cached.colorHex, !hex.isEmpty {
+        if isAccepted, let hex = participantProfile?.colorHex, !hex.isEmpty {
             return hex
         }
         switch participant.role {
-        case .owner: return "#5856D6" // indigo
+        case .owner: return "#5856D6"
         default: return participant.acceptanceStatus == .pending ? "#FF9500" : "#8E8E93"
         }
     }
@@ -611,12 +596,16 @@ private struct ParticipantRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                AvatarView(
-                    photoData: cachedProfile?.photoData,
-                    displayName: primaryText,
-                    colorHex: avatarColorHex,
-                    size: 40
-                )
+                if let pp = participantProfile {
+                    ObservedParticipantProfileAvatar(profile: pp, size: 40)
+                } else {
+                    AvatarView(
+                        photoData: nil,
+                        displayName: primaryText,
+                        colorHex: avatarColorHex,
+                        size: 40
+                    )
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
@@ -667,11 +656,6 @@ private struct ParticipantRow: View {
             }
         }
         .padding(.vertical, 4)
-        .task(id: recordName) {
-            if let rn = recordName, isAccepted {
-                await cache.fetchIfStale([rn])
-            }
-        }
     }
 }
 

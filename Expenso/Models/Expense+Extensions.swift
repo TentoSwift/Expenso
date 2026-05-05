@@ -15,12 +15,12 @@ extension Expense {
     var payerPhotoData: Data? { resolvedPayer?.photoData }
 
     /// `paidBy` の名前と一致するローカル `Member` を返す。Member は Private ストアのみに存在するため、
-    /// Shared ストアの Expense (他人のシート) では nil を返し、表示は `paidBy` 文字列にフォールバックする。
+    /// Shared ストアの Expense (他人のシート) では nil を返し、その場合は `resolvedParticipantProfile`
+    /// 経由で同期されたプロフィールから引く。
     var resolvedPayer: Member? {
         guard let name = paidBy, !name.isEmpty else { return nil }
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
-        // Shared ストアの Expense は他アカウントの paidBy を持ちうるため、自前 Member での解決を避ける
         if !objectID.isTemporaryID,
            let store = ctx.persistentStoreCoordinator?.persistentStore(for: objectID.uriRepresentation()),
            store == pc.sharedStore {
@@ -30,6 +30,16 @@ extension Expense {
         req.predicate = NSPredicate(format: "name == %@", name)
         req.fetchLimit = 1
         return (try? ctx.fetch(req))?.first
+    }
+
+    /// 同じシート配下の `ParticipantProfile` のうち、displayName が paidBy と一致するものを返す。
+    /// Shared ストアの Expense (= 他アカウントが書いた支出) の表示用に使う。
+    /// CloudKit Sharing 経由で同期されたプロフィール (写真・色) を引き出せる。
+    var resolvedParticipantProfile: ParticipantProfile? {
+        guard let name = paidBy, !name.isEmpty,
+              let sheet = sheet,
+              let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        return profiles.first(where: { $0.displayName == name })
     }
 
     var amountDecimal: Decimal {

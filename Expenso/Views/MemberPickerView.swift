@@ -15,7 +15,6 @@ struct MemberPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var profile = UserProfileStore.shared
-    @ObservedObject private var profileCache = RemoteProfileCache.shared
 
     @State private var share: CKShare?
 
@@ -161,13 +160,19 @@ struct MemberPickerView: View {
         let photoData: Data?
     }
 
+    /// 同シート配下の ParticipantProfile を recordName 一致で引く
+    private func participantProfile(for p: CKShare.Participant) -> ParticipantProfile? {
+        guard let record = record,
+              let rn = p.userIdentity.userRecordID?.recordName,
+              !rn.isEmpty, rn != "_defaultOwner_", rn != "__defaultOwner__",
+              let profiles = record.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        return profiles.first(where: { $0.recordName == rn })
+    }
+
     private func participantDisplayInfo(_ p: CKShare.Participant) -> ParticipantInfo {
-        let recordName = p.userIdentity.userRecordID?.recordName
-        let cached: RemoteProfileCache.CachedProfile? = recordName.flatMap {
-            $0.isEmpty || $0 == "_defaultOwner_" || $0 == "__defaultOwner__" ? nil : profileCache.profile(for: $0)
-        }
+        let pp = participantProfile(for: p)
         let name: String = {
-            if let n = cached?.displayName, !n.isEmpty { return n }
+            if let n = pp?.displayName, !n.isEmpty { return n }
             if let nc = p.userIdentity.nameComponents {
                 let formatted = PersonNameComponentsFormatter().string(from: nc)
                 if !formatted.isEmpty { return formatted }
@@ -175,8 +180,8 @@ struct MemberPickerView: View {
             if let email = p.userIdentity.lookupInfo?.emailAddress, !email.isEmpty { return email }
             return p.role == .owner ? "オーナー" : "メンバー"
         }()
-        let color = (cached?.colorHex).flatMap { $0.isEmpty ? nil : $0 } ?? "#8E8E93"
-        return ParticipantInfo(name: name, colorHex: color, photoData: cached?.photoData)
+        let color = (pp?.colorHex).flatMap { $0.isEmpty ? nil : $0 } ?? "#8E8E93"
+        return ParticipantInfo(name: name, colorHex: color, photoData: pp?.photoData)
     }
 
     /// 参加者を選択した時、ローカルに同名 Member が居れば再利用、なければ作成して `selected` に紐づける。
@@ -205,12 +210,7 @@ struct MemberPickerView: View {
             return
         }
         share = ShareCoordinator.shared.existingShare(for: record)
-        // 参加者プロフィールをキャッシュへ取得
-        if let share = share {
-            let names = share.participants.compactMap { $0.userIdentity.userRecordID?.recordName }
-                .filter { !$0.isEmpty && $0 != "_defaultOwner_" && $0 != "__defaultOwner__" }
-            await profileCache.fetchIfStale(names)
-        }
+        // ParticipantProfile は CloudKit Sharing 経由で自動同期されるためここでは何もしない
     }
 }
 

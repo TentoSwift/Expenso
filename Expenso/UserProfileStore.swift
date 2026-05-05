@@ -2,8 +2,9 @@
 //  UserProfileStore.swift
 //  Expenso
 //
-//  ユーザーのアバター画像 (写真 or Memoji 合成) と表示名を端末/アカウント単位で保持する。
-//  シートとは独立。CloudKit Public DB にも同期して、共有先からも見えるようにする。
+//  ユーザーのアバター画像 (写真 or Memoji 合成) と表示名をローカルに保持。
+//  Public DB は使わず、共有相手への可視化は各 ExpenseSheet 配下の
+//  ParticipantProfile レコード経由で行う (CloudKit Sharing 経由で同期)。
 //
 
 import Foundation
@@ -20,8 +21,10 @@ final class UserProfileStore: ObservableObject {
         static let displayName       = "userProfile.displayName"
         static let avatarBgColorHex  = "userProfile.avatarBgColorHex"
         static let selfMemberID      = "userProfile.selfMemberID"
+        static let userRecordName    = "userProfile.userRecordName"
     }
     private static let photoFileName = "userProfile.photo.jpg"
+    private static let containerID = "iCloud.com.tento.Expenso"
 
     @Published var displayName: String {
         didSet {
@@ -36,7 +39,6 @@ final class UserProfileStore: ObservableObject {
     }
 
     /// アバター画像 (JPEG)。写真選択 or Memoji 合成の結果。
-    /// `Application Support/userProfile.photo.jpg` に保存。
     @Published var photoData: Data? {
         didSet { writePhotoToDisk() }
     }
@@ -47,7 +49,11 @@ final class UserProfileStore: ObservableObject {
         }
     }
 
-    /// アバター背景色。SwiftUI から使うために Color 化。未設定時は青。
+    /// 自分の CKUserIdentity recordName をキャッシュ。ParticipantProfile の同一性キー。
+    @Published private(set) var userRecordName: String? {
+        didSet { UserDefaults.standard.set(userRecordName, forKey: Keys.userRecordName) }
+    }
+
     var bgColor: Color { Color(hex: avatarBgColorHex ?? "#5B8DEF") ?? .blue }
 
     var resolvedDisplayName: String {
@@ -65,6 +71,7 @@ final class UserProfileStore: ObservableObject {
         } else {
             self.selfMemberID = nil
         }
+        self.userRecordName = ud.string(forKey: Keys.userRecordName)
         self.photoData = Self.readPhotoFromDisk()
     }
 
@@ -88,12 +95,21 @@ final class UserProfileStore: ObservableObject {
         }
     }
 
-    // MARK: - Self Member sync
+    // MARK: - User record name fetch
 
-    /// Settings 編集後に呼ぶ。selfMemberID に対応する Member エンティティを
-    /// 作成または更新し、自分が払った Private ストアの過去支出の paidBy も新しい名前に追従させる
-    /// (`Expense.paidBy` は文字列フリーズなので、ここで一括 rename しないと過去ログのアバターが
-    /// プロフィール変更後に解決できなくなる)。
+    /// 自分の CKUserIdentity.recordName を取得しキャッシュ。初回起動時に必要。
+    func ensureUserRecordNameLoaded() async {
+        if let existing = userRecordName, !existing.isEmpty { return }
+        let container = CKContainer(identifier: Self.containerID)
+        if let id = try? await container.userRecordID() {
+            userRecordName = id.recordName
+        }
+    }
+
+    // MARK: - Self Member sync (for paidBy resolution in Private sheets)
+
+    /// Settings 編集後に呼ぶ。selfMemberID に対応する Member を更新し、
+    /// 自分が払った Private ストアの過去支出の paidBy も追従更新する。
     func applyToSelfMember(in ctx: NSManagedObjectContext) {
         let resolvedID: UUID
         if let id = selfMemberID {
@@ -112,7 +128,6 @@ final class UserProfileStore: ObservableObject {
             member = existing
             oldName = existing.name
         } else {
-            // 旧スキーマからの移行: 名前一致の既存メンバーを再利用
             let nameReq = NSFetchRequest<Member>(entityName: "Member")
             nameReq.predicate = NSPredicate(format: "name == %@", resolvedDisplayName)
             nameReq.sortDescriptors = [NSSortDescriptor(keyPath: \Member.createdAt, ascending: true)]
@@ -135,7 +150,6 @@ final class UserProfileStore: ObservableObject {
         member.colorHex  = avatarBgColorHex ?? "#5B8DEF"
         member.photoData = photoData
 
-        // 名前が変わったら、自分が払った Private ストアの過去支出の paidBy を追従更新
         if let old = oldName, !old.isEmpty, old != newName {
             renamePaidByInPrivateStore(from: old, to: newName, in: ctx)
         }
@@ -143,8 +157,6 @@ final class UserProfileStore: ObservableObject {
         try? ctx.save()
     }
 
-    /// `paidBy == old` の Expense のうち、Private ストアにあるもの (= 自分が所有するもの) だけを
-    /// `paidBy = new` に書き換える。Shared ストアの支出は他アカウントが所有するため触らない。
     private func renamePaidByInPrivateStore(from old: String, to new: String, in ctx: NSManagedObjectContext) {
         let pc = PersistenceController.shared
         guard let coord = ctx.persistentStoreCoordinator,
@@ -166,67 +178,72 @@ final class UserProfileStore: ObservableObject {
         applyToSelfMember(in: ctx)
     }
 
-    // MARK: - CloudKit Public DB sync
+    // MARK: - ParticipantProfile propagation (cross-account visibility)
 
-    private static let containerID = "iCloud.com.tento.Expenso"
-    private static let recordType = "UserProfile"
+    /// 自分のプロフィールを、参加している全シート (Private + Shared) の `participantProfiles` に
+    /// ParticipantProfile レコードとして書き込む。CKShare 経由で他の参加者にも同期される。
+    /// - Parameter context: 操作するコンテキスト (通常 viewContext)
+    func propagateProfile(in ctx: NSManagedObjectContext) {
+        guard let recordName = userRecordName, !recordName.isEmpty else { return }
 
-    /// 自分のプロフィールを CloudKit Public DB に保存する。
-    /// recordName 形式: `profile_<userRecordName>` で他デバイスからフェッチ可能。
-    func saveToCloudKit() async {
-        let container = CKContainer(identifier: Self.containerID)
-        do {
-            let userID = try await container.userRecordID()
-            let profileID = CKRecord.ID(recordName: "profile_\(userID.recordName)")
-            let record: CKRecord
-            if let existing = try? await container.publicCloudDatabase.record(for: profileID),
-               existing.recordType == Self.recordType {
-                record = existing
+        let pc = PersistenceController.shared
+        guard let coord = ctx.persistentStoreCoordinator else { return }
+
+        let sheetReq = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        guard let sheets = try? ctx.fetch(sheetReq) else { return }
+
+        let now = Date()
+        let newName = resolvedDisplayName
+        let newColor = avatarBgColorHex ?? "#5B8DEF"
+
+        for sheet in sheets {
+            // どのストアに居るかを取得 (Private なら自分のシート、Shared なら参加シート)
+            guard let sheetStore = coord.persistentStore(for: sheet.objectID.uriRepresentation()) else { continue }
+
+            // 既存の自分のプロフィールを探す
+            let existing: ParticipantProfile? = (sheet.participantProfiles as? Set<ParticipantProfile>)?
+                .first(where: { $0.recordName == recordName })
+
+            let profile: ParticipantProfile
+            if let existing {
+                profile = existing
             } else {
-                record = CKRecord(recordType: Self.recordType, recordID: profileID)
+                profile = ParticipantProfile(context: ctx)
+                ctx.assign(profile, to: sheetStore) // 親シートと同じストアに割り当て
+                profile.recordName = recordName
+                profile.sheet = sheet
             }
-            record["displayName"] = resolvedDisplayName as CKRecordValue
-            record["avatarBgColorHex"] = (avatarBgColorHex ?? "#5B8DEF") as CKRecordValue
-
-            // 写真は CKAsset として保存。一時ファイルにコピーしてから渡す
-            if let data = photoData {
-                let tmp = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("expenso_profile_\(UUID().uuidString).jpg")
-                try data.write(to: tmp, options: [.atomic])
-                record["photo"] = CKAsset(fileURL: tmp)
-            } else {
-                record["photo"] = nil
-            }
-            _ = try await container.publicCloudDatabase.save(record)
-        } catch {
-            // 失敗時はサイレント (オフライン等)
+            profile.displayName = newName
+            profile.colorHex = newColor
+            profile.photoData = photoData
+            profile.updatedAt = now
         }
+
+        try? ctx.save()
     }
 
-    /// 起動時に Public DB から自分のプロフィールを取得して、ローカルが未設定の場合に反映する。
-    func refreshFromCloudKit() async {
-        let container = CKContainer(identifier: Self.containerID)
-        do {
-            let userID = try await container.userRecordID()
-            let profileID = CKRecord.ID(recordName: "profile_\(userID.recordName)")
-            guard let record = try? await container.publicCloudDatabase.record(for: profileID),
-                  record.recordType == Self.recordType else { return }
-            await MainActor.run {
-                if displayName.isEmpty, let n = record["displayName"] as? String, !n.isEmpty {
-                    displayName = n
-                }
-                if avatarBgColorHex == nil, let c = record["avatarBgColorHex"] as? String, !c.isEmpty {
-                    avatarBgColorHex = c
-                }
-                if photoData == nil,
-                   let asset = record["photo"] as? CKAsset,
-                   let url = asset.fileURL,
-                   let data = try? Data(contentsOf: url) {
-                    photoData = data
-                }
-            }
-        } catch {
-            // 失敗時はローカルのまま続行
+    /// 1 シートだけプロフィールを書き込む (支出追加時など、特定シートだけ更新する用途)。
+    func ensureProfile(in sheet: ExpenseSheet, ctx: NSManagedObjectContext) {
+        guard let recordName = userRecordName, !recordName.isEmpty else { return }
+        let pc = PersistenceController.shared
+        guard let coord = ctx.persistentStoreCoordinator,
+              let sheetStore = coord.persistentStore(for: sheet.objectID.uriRepresentation()) else { return }
+
+        let existing = (sheet.participantProfiles as? Set<ParticipantProfile>)?
+            .first(where: { $0.recordName == recordName })
+
+        let profile: ParticipantProfile
+        if let existing {
+            profile = existing
+        } else {
+            profile = ParticipantProfile(context: ctx)
+            ctx.assign(profile, to: sheetStore)
+            profile.recordName = recordName
+            profile.sheet = sheet
         }
+        profile.displayName = resolvedDisplayName
+        profile.colorHex = avatarBgColorHex ?? "#5B8DEF"
+        profile.photoData = photoData
+        profile.updatedAt = .now
     }
 }

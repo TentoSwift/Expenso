@@ -336,6 +336,8 @@ struct AddExpenseView: View {
                coordinator.persistentStore(for: cat.objectID.uriRepresentation()) == sheetStore {
                 expense.category = cat
             }
+            // 自分の ParticipantProfile を同シートに ensure (まだ無ければ作成、あれば更新)
+            profile.ensureProfile(in: record, ctx: viewContext)
         case .edit(let expense):
             expense.title = title.trimmingCharacters(in: .whitespaces)
             expense.amount = NSDecimalNumber(decimal: amountDecimal)

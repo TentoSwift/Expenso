@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="26F0" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="V3">
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="26F0" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="V4">
     <entity name="ExpenseCategory" representedClassName="ExpenseCategory" syncable="YES" codeGenerationType="class">
         <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#888888"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
@@ -20,6 +20,15 @@
         <attribute name="note" optional="YES" attributeType="String" defaultValueString=""/>
         <relationship name="categories" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="ExpenseCategory" inverseName="sheet" inverseEntity="ExpenseCategory"/>
         <relationship name="expenses" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Expense" inverseName="sheet" inverseEntity="Expense"/>
+        <relationship name="participantProfiles" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="ParticipantProfile" inverseName="sheet" inverseEntity="ParticipantProfile"/>
+    </entity>
+    <entity name="ParticipantProfile" representedClassName="ParticipantProfile" syncable="YES" codeGenerationType="class">
+        <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#5B8DEF"/>
+        <attribute name="displayName" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="photoData" optional="YES" attributeType="Binary" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="recordName" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="sheet" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="ExpenseSheet" inverseName="participantProfiles" inverseEntity="ExpenseSheet"/>
     </entity>
     <entity name="Expense" representedClassName="Expense" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Decimal" defaultValueString="0"/>
@@ -47,10 +56,12 @@
         <memberEntity name="ExpenseSheet"/>
         <memberEntity name="Expense"/>
         <memberEntity name="Member"/>
+        <memberEntity name="ParticipantProfile"/>
     </configuration>
     <configuration name="Shared" usedWithCloudKit="YES">
         <memberEntity name="ExpenseCategory"/>
         <memberEntity name="ExpenseSheet"/>
         <memberEntity name="Expense"/>
+        <memberEntity name="ParticipantProfile"/>
     </configuration>
 </model>

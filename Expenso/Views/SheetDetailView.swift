@@ -573,6 +573,7 @@ private struct ExpenseRowView: View {
                         if let paidBy = expense.paidBy, !paidBy.isEmpty {
                             PayerAvatar(
                                 member: expense.resolvedPayer,
+                                participantProfile: expense.resolvedParticipantProfile,
                                 fallbackName: paidBy,
                                 fallbackColorHex: "#8E8E93",
                                 fallbackPhoto: nil,

@@ -77,10 +77,29 @@ struct ObservedMemberAvatar: View {
     }
 }
 
-/// 支払者アバター用ラッパー。Member が解決できればそれを観測、解決できなければ
-/// 名前+色から `AvatarView` を構築する。Expense 行のような所で共通利用する。
+/// `ParticipantProfile` を `@ObservedObject` で監視するアバター。
+/// Shared ストアでオーナー / 他参加者のプロフィールが更新された時に自動で再描画する。
+struct ObservedParticipantProfileAvatar: View {
+    @ObservedObject var profile: ParticipantProfile
+    var size: CGFloat = 40
+
+    var body: some View {
+        AvatarView(
+            photoData: profile.photoData,
+            displayName: profile.displayName ?? "",
+            colorHex: profile.colorHex ?? "#8E8E93",
+            size: size
+        )
+    }
+}
+
+/// 支払者アバター用ラッパー。解決順:
+/// 1. ローカル `Member` (Private ストアの自分のシート) → `ObservedMemberAvatar`
+/// 2. シート配下の `ParticipantProfile` (Shared ストアの他参加者) → `ObservedParticipantProfileAvatar`
+/// 3. 名前+色のフォールバック → `AvatarView`
 struct PayerAvatar: View {
     let member: Member?
+    let participantProfile: ParticipantProfile?
     let fallbackName: String
     let fallbackColorHex: String
     let fallbackPhoto: Data?
@@ -89,6 +108,8 @@ struct PayerAvatar: View {
     var body: some View {
         if let member {
             ObservedMemberAvatar(member: member, size: size)
+        } else if let participantProfile {
+            ObservedParticipantProfileAvatar(profile: participantProfile, size: size)
         } else {
             AvatarView(name: fallbackName, colorHex: fallbackColorHex, photoData: fallbackPhoto, size: size)
         }

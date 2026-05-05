@@ -70,6 +70,7 @@ struct StatsView: View {
     private struct PayerSummary: Identifiable {
         let name: String
         let member: Member?
+        let participantProfile: ParticipantProfile?
         let colorHex: String
         let photoData: Data?
         let tint: Color
@@ -85,16 +86,18 @@ struct StatsView: View {
             exp.paidBy?.isEmpty == false ? exp.paidBy! : "未指定"
         }
         return grouped.map { (name, list) in
-            let resolved = list.first?.resolvedPayer
+            let resolvedMember = list.first?.resolvedPayer
+            let resolvedPP = list.first?.resolvedParticipantProfile
             let total = list.reduce(Decimal(0)) { acc, e in
                 acc + (fx.convert(e.amountDecimal, from: e.resolvedCurrencyCode, to: target) ?? e.amountDecimal)
             }
             return PayerSummary(
                 name: name,
-                member: resolved,
-                colorHex: resolved?.displayColorHex ?? "#8E8E93",
-                photoData: resolved?.photoData,
-                tint: resolved?.tint ?? .secondary,
+                member: resolvedMember,
+                participantProfile: resolvedPP,
+                colorHex: resolvedMember?.displayColorHex ?? resolvedPP?.colorHex ?? "#8E8E93",
+                photoData: resolvedMember?.photoData ?? resolvedPP?.photoData,
+                tint: resolvedMember?.tint ?? .secondary,
                 total: total,
                 count: list.count
             )
@@ -356,6 +359,7 @@ struct StatsView: View {
                 HStack {
                     PayerAvatar(
                         member: item.member,
+                        participantProfile: item.participantProfile,
                         fallbackName: item.name,
                         fallbackColorHex: item.colorHex,
                         fallbackPhoto: item.photoData,

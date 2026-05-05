@@ -56,8 +56,8 @@ struct ExpensoApp: App {
                 .task {
                     await PurchaseManager.shared.refreshEntitlements()
                     await FXRatesService.shared.refreshIfStale()
-                    await UserProfileStore.shared.refreshFromCloudKit()
-                    await UserProfileStore.shared.saveToCloudKit()
+                    await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                    UserProfileStore.shared.propagateProfile(in: persistenceController.container.viewContext)
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     // フォアグラウンド復帰時にも entitlement を再確認。
