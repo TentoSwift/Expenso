@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="26F0" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="V2">
+    <entity name="ExpenseCategory" representedClassName="ExpenseCategory" syncable="YES" codeGenerationType="class">
+        <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#888888"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isBuiltIn" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="kindRaw" optional="YES" attributeType="String" defaultValueString="expense"/>
+        <attribute name="name" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="symbol" optional="YES" attributeType="String" defaultValueString="ellipsis.circle"/>
+        <relationship name="expenses" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Expense" inverseName="category" inverseEntity="Expense"/>
+        <relationship name="sheet" optional="YES" maxCount="1" deletionRule="Nullify" renamingIdentifier="group" destinationEntity="ExpenseSheet" inverseName="categories" inverseEntity="ExpenseSheet"/>
+    </entity>
+    <entity name="ExpenseSheet" representedClassName="ExpenseSheet" renamingIdentifier="ExpenseGroup" syncable="YES" codeGenerationType="class">
+        <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#5B8DEF"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="defaultCurrencyCode" optional="YES" attributeType="String" defaultValueString="JPY"/>
+        <attribute name="name" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="note" optional="YES" attributeType="String" defaultValueString=""/>
+        <relationship name="categories" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="ExpenseCategory" inverseName="sheet" inverseEntity="ExpenseCategory"/>
+        <relationship name="expenses" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Expense" inverseName="sheet" inverseEntity="Expense"/>
+    </entity>
+    <entity name="Expense" representedClassName="Expense" syncable="YES" codeGenerationType="class">
+        <attribute name="amount" optional="YES" attributeType="Decimal" defaultValueString="0"/>
+        <attribute name="categoryRaw" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="currencyCode" optional="YES" attributeType="String" defaultValueString="JPY"/>
+        <attribute name="date" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="kindRaw" optional="YES" attributeType="String" defaultValueString="expense"/>
+        <attribute name="note" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="paidBy" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="title" optional="YES" attributeType="String" defaultValueString=""/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="ExpenseCategory" inverseName="expenses" inverseEntity="ExpenseCategory"/>
+        <relationship name="sheet" optional="YES" maxCount="1" deletionRule="Nullify" renamingIdentifier="group" destinationEntity="ExpenseSheet" inverseName="expenses" inverseEntity="ExpenseSheet"/>
+    </entity>
+    <entity name="Member" representedClassName="Member" syncable="YES" codeGenerationType="class">
+        <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#5B8DEF"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="symbol" optional="YES" attributeType="String" defaultValueString="person.fill"/>
+    </entity>
+    <configuration name="Private" usedWithCloudKit="YES">
+        <memberEntity name="ExpenseCategory"/>
+        <memberEntity name="ExpenseSheet"/>
+        <memberEntity name="Expense"/>
+        <memberEntity name="Member"/>
+    </configuration>
+    <configuration name="Shared" usedWithCloudKit="YES">
+        <memberEntity name="ExpenseCategory"/>
+        <memberEntity name="ExpenseSheet"/>
+        <memberEntity name="Expense"/>
+    </configuration>
+</model>

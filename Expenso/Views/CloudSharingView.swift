@@ -1,0 +1,727 @@
+//
+//  CloudSharingView.swift
+//  Expenso
+//
+
+import SwiftUI
+import CoreData
+import CloudKit
+import UIKit
+import MessageUI
+
+struct CloudSharingView: View {
+    @ObservedObject var record: ExpenseSheet
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var purchaseManager = PurchaseManager.shared
+
+    @State private var email: String = ""
+    @State private var permission: CKShare.ParticipantPermission = .readWrite
+    @State private var isProcessing: Bool = false
+    @State private var errorMessage: String?
+    @State private var iCloudHint: String?
+    @State private var existingShare: CKShare?
+    @State private var participantsRefresh: Int = 0
+    @State private var mailData: MailData?
+    @State private var showMailUnavailable: Bool = false
+    @State private var showCopiedToast: Bool = false
+    @State private var pendingURL: URL?
+    @State private var showPaywall: Bool = false
+    @State private var isLoadingShare: Bool = false
+
+    private var trimmedEmail: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isValidEmail: Bool {
+        let pattern = #"^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#
+        return trimmedEmail.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private var isOwner: Bool { record.isOwnedByCurrentUser }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if !isOwner {
+                    participantView
+                } else if purchaseManager.isPremium {
+                    premiumForm
+                } else {
+                    premiumGate
+                }
+            }
+            .navigationTitle(isOwner ? "シートを共有" : "共有シートの情報")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("閉じる") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+            }
+            .overlay(alignment: .top) {
+                if showCopiedToast {
+                    Text("コピーしました")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .sheet(item: $mailData) { data in
+                MailComposeView(data: data) { result in
+                    mailData = nil
+                    if case .failure(let err) = result {
+                        errorMessage = err.localizedDescription
+                    }
+                }
+                .ignoresSafeArea()
+            }
+            .alert("メール送信ができません", isPresented: $showMailUnavailable) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("この端末ではメール送信が設定されていません。「リンクをコピー」で他のアプリから送ってください。")
+            }
+            .task {
+                if purchaseManager.isPremium {
+                    await checkICloudStatus()
+                    refreshShare()
+                }
+            }
+        }
+    }
+
+    private var premiumForm: some View {
+        Form {
+            groupHeader
+            if let share = existingShare {
+                participantsSection(share: share)
+            }
+            inviteSection
+            shareLinkSection
+            if let errorMessage { errorSection(message: errorMessage) }
+            if let iCloudHint { hintSection(text: iCloudHint) }
+        }
+    }
+
+    private var participantView: some View {
+        Form {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.displayName).bold()
+                        Text("既定通貨: \(record.resolvedDefaultCurrencyCode)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "person.2.circle.fill")
+                        .foregroundStyle(record.tint)
+                }
+            } footer: {
+                Text("このシートはオーナーから共有されています。シートのデータはオーナー側と同期され、あなたは追加・編集ができます。")
+            }
+
+            if let share = existingShare, !share.participants.isEmpty {
+                participantsSection(share: share)
+            } else {
+                Section {
+                    HStack(spacing: 10) {
+                        if isLoadingShare {
+                            ProgressView()
+                            Text("共有情報を取得中...")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "person.2.slash")
+                                .foregroundStyle(.secondary)
+                            Text(existingShare == nil
+                                 ? "共有情報をまだ取得できていません"
+                                 : "他の参加者はまだいません")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                Task { await refreshShareAsync() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(isLoadingShare)
+                        }
+                    }
+                    .font(.subheadline)
+                } header: {
+                    Text("参加者")
+                } footer: {
+                    if existingShare == nil {
+                        Text("CloudKit との同期にしばらく時間がかかる場合があります。引き下げて更新するか、再読み込みボタンをタップしてください。")
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    Task { await leaveSharedSheet() }
+                } label: {
+                    HStack {
+                        if isProcessing { ProgressView() }
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("シートから退出")
+                        Spacer()
+                    }
+                }
+                .disabled(isProcessing)
+            } footer: {
+                Text("退出するとあなたの端末からこのシートが消えます。オーナーや他の参加者のデータは残ります。")
+            }
+
+            if let errorMessage { errorSection(message: errorMessage) }
+        }
+        .refreshable { await refreshShareAsync() }
+        .task {
+            await checkICloudStatus()
+            await refreshShareAsync()
+        }
+    }
+
+    /// 共有情報の取得を非同期で行う。Core Data の `fetchShares` が即返らないケース
+    /// (Shared ストアに来たばかりの sheet 等) に対応するため、軽くリトライする。
+    @MainActor
+    private func refreshShareAsync() async {
+        isLoadingShare = true
+        defer { isLoadingShare = false }
+        for attempt in 0..<3 {
+            if let share = ShareCoordinator.shared.existingShare(for: record) {
+                existingShare = share
+                await fetchAllParticipantProfiles(share)
+                return
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+        // 取得できなかった場合も existingShare は nil のまま
+    }
+
+    @MainActor
+    private func leaveSharedSheet() async {
+        isProcessing = true
+        errorMessage = nil
+        let ctx = PersistenceController.shared.container.viewContext
+        ctx.delete(record)
+        do {
+            try ctx.save()
+            Haptics.warning()
+            dismiss()
+        } catch {
+            errorMessage = "退出に失敗しました: \(error.localizedDescription)"
+        }
+        isProcessing = false
+    }
+
+    private var premiumGate: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "lock.icloud.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.tint)
+            VStack(spacing: 8) {
+                Text("招待を送るには Premium が必要です")
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                Text("シートのオーナー (招待を送る人) のみ課金が必要です。\n招待された相手は無料でこのシートに参加できます。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                showPaywall = true
+            } label: {
+                Label("Premium を見る", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal, 32)
+            Spacer()
+        }
+        .padding()
+    }
+
+    private var groupHeader: some View {
+        Section {
+            Label {
+                Text(record.displayName).bold()
+            } icon: {
+                Image(systemName: "person.2.circle.fill")
+                    .foregroundStyle(Color(hex: record.displayColorHex) ?? .blue)
+            }
+        } footer: {
+            Text("メールアドレスから iCloud アカウントを検索し、権限を付与した上で招待します。受け取った相手は同期で参加できます。")
+        }
+    }
+
+    @ViewBuilder
+    private func participantsSection(share: CKShare) -> some View {
+        let displayed = share.participants
+        if !displayed.isEmpty {
+            Section {
+                ForEach(Array(displayed.enumerated()), id: \.offset) { _, participant in
+                    ParticipantRow(participant: participant, isOwnerView: isOwner) { permission in
+                        await update(participant: participant, share: share, to: permission)
+                    } onRemove: {
+                        await removeParticipant(participant, from: share)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("参加者")
+                    Spacer()
+                    Button {
+                        Task { await fetchAllParticipantProfiles(share) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .id(participantsRefresh)
+            .task(id: share.url) {
+                await fetchAllParticipantProfiles(share)
+            }
+        }
+    }
+
+    private func fetchAllParticipantProfiles(_ share: CKShare) async {
+        let recordNames = share.participants
+            .filter { $0.acceptanceStatus != .pending }
+            .compactMap { $0.userIdentity.userRecordID?.recordName }
+            .filter { !$0.isEmpty && $0 != "_defaultOwner_" && $0 != "__defaultOwner__" }
+        guard !recordNames.isEmpty else { return }
+        await RemoteProfileCache.shared.fetch(recordNames) // 強制再取得
+    }
+
+    private var inviteSection: some View {
+        Group {
+            Section("招待先のメールアドレス") {
+                TextField("name@icloud.com", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            Section("権限") {
+                Picker("権限", selection: $permission) {
+                    Text("編集可能").tag(CKShare.ParticipantPermission.readWrite)
+                    Text("閲覧のみ").tag(CKShare.ParticipantPermission.readOnly)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section {
+                Button {
+                    Task { await sendInvitation() }
+                } label: {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                        Text(isProcessing ? "招待を準備中..." : "権限を付与して招待を送る")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isProcessing || !isValidEmail)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            } footer: {
+                Text("招待先の Apple ID に登録済みのメールアドレスを入力してください。iCloud に登録されていないアドレスでは招待できません。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var shareLinkSection: some View {
+        let resolvedURL: URL? = pendingURL ?? existingShare?.url
+        Section {
+            if let url = resolvedURL {
+                ShareLink(item: url,
+                          subject: Text("Expenso「\(record.displayName)」への招待"),
+                          message: Text(invitationMessage(url: url))) {
+                    Label("AirDrop ・ メッセージ ・ 他のアプリ", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    UIPasteboard.general.string = url.absoluteString
+                    withAnimation { showCopiedToast = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation { showCopiedToast = false }
+                    }
+                } label: {
+                    Label("リンクをコピー", systemImage: "doc.on.doc")
+                }
+                Text(url.absoluteString)
+                    .font(.caption.monospaced())
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button {
+                    Task { await prepareLinkOnly() }
+                } label: {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "link.circle")
+                        }
+                        Text(isProcessing ? "リンクを準備中..." : "共有リンクを準備")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(isProcessing)
+            }
+        } header: {
+            Text("リンクで共有")
+        } footer: {
+            if resolvedURL == nil {
+                Text("リンクを生成すると AirDrop / メッセージなどで誰にでも送れます。リンクから参加した相手は自動的にこのシートに加わります。")
+            } else {
+                Text("リンクから参加した相手は自動的にこのシートに加わります (Apple ID が必要)。")
+            }
+        }
+    }
+
+    private func invitationMessage(url: URL) -> String {
+        """
+        Expenso のシート「\(record.displayName)」に招待します。
+        下のリンクをタップして参加してください:
+        \(url.absoluteString)
+        """
+    }
+
+    @MainActor
+    private func prepareLinkOnly() async {
+        isProcessing = true
+        errorMessage = nil
+        do {
+            let result = try await ShareCoordinator.shared.prepareShareLink(for: record)
+            existingShare = result.share
+            pendingURL = result.url
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    private func errorSection(message: String) -> some View {
+        Section {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func hintSection(text: String) -> some View {
+        Section {
+            Label(text, systemImage: "icloud.slash")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @MainActor
+    private func sendInvitation() async {
+        isProcessing = true
+        errorMessage = nil
+        do {
+            let result = try await ShareCoordinator.shared.invite(
+                email: trimmedEmail,
+                permission: permission,
+                to: record
+            )
+            existingShare = result.share
+            pendingURL = result.url
+
+            let data = MailData(
+                recipient: trimmedEmail,
+                subject: "Expenso「\(record.displayName)」への招待",
+                body: """
+                Expenso のシート「\(record.displayName)」に招待されました。
+
+                権限: \(permission == .readWrite ? "編集可能" : "閲覧のみ")
+
+                下のリンクをタップしてシートに参加してください。
+
+                \(result.url.absoluteString)
+
+                — Expenso
+                """
+            )
+            if MFMailComposeViewController.canSendMail() {
+                mailData = data
+            } else {
+                showMailUnavailable = true
+            }
+
+            email = ""
+            participantsRefresh += 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    @MainActor
+    private func update(participant: CKShare.Participant, share: CKShare, to newPermission: CKShare.ParticipantPermission) async {
+        participant.permission = newPermission
+        do {
+            let pc = PersistenceController.shared
+            guard let store = pc.privateStore else { throw ShareError.storeNotReady }
+            try await pc.container.persistUpdatedShare(share, in: store)
+            participantsRefresh += 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func removeParticipant(_ participant: CKShare.Participant, from share: CKShare) async {
+        do {
+            try await ShareCoordinator.shared.remove(participant: participant, from: share)
+            participantsRefresh += 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func refreshShare() {
+        existingShare = ShareCoordinator.shared.existingShare(for: record)
+    }
+
+    private func checkICloudStatus() async {
+        let status = try? await CKContainer(identifier: "iCloud.com.tento.Expenso").accountStatus()
+        await MainActor.run {
+            iCloudHint = Self.hint(for: status)
+        }
+    }
+
+    private static func hint(for status: CKAccountStatus?) -> String? {
+        switch status {
+        case .some(.available), .none: return nil
+        case .some(.noAccount): return "iCloud にサインインしていません。設定アプリから iCloud にサインインしてください。"
+        case .some(.restricted): return "iCloud アカウントが制限されています。"
+        case .some(.couldNotDetermine): return "iCloud の状態を確認できませんでした。"
+        case .some(.temporarilyUnavailable): return "iCloud が一時的に利用できません。"
+        @unknown default: return nil
+        }
+    }
+}
+
+private struct ParticipantRow: View {
+    let participant: CKShare.Participant
+    var isOwnerView: Bool = true
+    let onPermissionChange: (CKShare.ParticipantPermission) async -> Void
+    let onRemove: () async -> Void
+
+    @ObservedObject private var cache = RemoteProfileCache.shared
+
+    private var recordName: String? {
+        guard let rn = participant.userIdentity.userRecordID?.recordName,
+              !rn.isEmpty,
+              rn != "_defaultOwner_",
+              rn != "__defaultOwner__" else { return nil }
+        return rn
+    }
+
+    private var emailAddress: String? {
+        participant.userIdentity.lookupInfo?.emailAddress
+    }
+
+    private var cachedProfile: RemoteProfileCache.CachedProfile? {
+        guard let rn = recordName else { return nil }
+        return cache.profile(for: rn)
+    }
+
+    private var isAccepted: Bool {
+        participant.acceptanceStatus == .accepted
+    }
+
+    private var primaryText: String {
+        // 参加済みは Public DB のプロフィール表示名を最優先
+        if isAccepted, let cached = cachedProfile, let n = cached.displayName, !n.isEmpty {
+            return n
+        }
+        // 招待中はメールアドレス
+        if participant.acceptanceStatus == .pending, let email = emailAddress {
+            return email
+        }
+        if let info = participant.userIdentity.lookupInfo {
+            if let email = info.emailAddress { return email }
+            if let phone = info.phoneNumber { return phone }
+        }
+        if let nc = participant.userIdentity.nameComponents {
+            return PersonNameComponentsFormatter().string(from: nc)
+        }
+        return "メンバー"
+    }
+
+    private var secondaryText: String? {
+        // 参加済みでプロフィール取得済み: メールアドレスを補助情報として表示
+        if isAccepted, cachedProfile?.displayName?.isEmpty == false {
+            return emailAddress
+        }
+        return nil
+    }
+
+    private var avatarColor: Color {
+        if isAccepted, let cached = cachedProfile, let hex = cached.colorHex, let c = Color(hex: hex) {
+            return c
+        }
+        switch participant.role {
+        case .owner: return .indigo
+        default: return participant.acceptanceStatus == .pending ? .orange : .gray
+        }
+    }
+
+    private var avatarSymbol: String {
+        if isAccepted, let cached = cachedProfile, let s = cached.iconSymbol, !s.isEmpty {
+            return s
+        }
+        return participant.acceptanceStatus == .pending ? "envelope.fill" : "person.fill"
+    }
+
+    private var statusText: String {
+        switch participant.acceptanceStatus {
+        case .pending: "招待中"
+        case .accepted: "参加済み"
+        case .removed: "削除済み"
+        case .unknown: "不明"
+        @unknown default: "不明"
+        }
+    }
+
+    private var roleText: String {
+        switch participant.role {
+        case .owner: "オーナー"
+        case .privateUser: "プライベート"
+        case .publicUser: "公開"
+        case .unknown: ""
+        @unknown default: ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(avatarColor.gradient)
+                    Image(systemName: avatarSymbol)
+                        .foregroundStyle(.white)
+                        .font(.callout.weight(.semibold))
+                }
+                .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primaryText)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    if let sub = secondaryText {
+                        Text(sub)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    HStack(spacing: 6) {
+                        Text(roleText)
+                        if participant.role != .owner {
+                            Text("·")
+                            Text(statusText)
+                                .foregroundStyle(participant.acceptanceStatus == .pending ? .orange : .secondary)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if isOwnerView, participant.role != .owner {
+                HStack {
+                    Picker("権限", selection: Binding(
+                        get: { participant.permission },
+                        set: { newValue in Task { await onPermissionChange(newValue) } }
+                    )) {
+                        Text("編集可能").tag(CKShare.ParticipantPermission.readWrite)
+                        Text("閲覧のみ").tag(CKShare.ParticipantPermission.readOnly)
+                    }
+                    .pickerStyle(.segmented)
+                    Button(role: .destructive) {
+                        Task { await onRemove() }
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.minus")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else if !isOwnerView, participant.role != .owner {
+                Text(participant.permission == .readWrite ? "編集可能" : "閲覧のみ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 52)
+            }
+        }
+        .padding(.vertical, 4)
+        .task(id: recordName) {
+            if let rn = recordName, isAccepted {
+                await cache.fetchIfStale([rn])
+            }
+        }
+    }
+}
+
+private struct MailData: Identifiable {
+    let id = UUID()
+    let recipient: String
+    let subject: String
+    let body: String
+}
+
+private struct MailComposeView: UIViewControllerRepresentable {
+    let data: MailData
+    let onFinish: (Result<MFMailComposeResult, Error>) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let vc = MFMailComposeViewController()
+        if !data.recipient.isEmpty { vc.setToRecipients([data.recipient]) }
+        vc.setSubject(data.subject)
+        vc.setMessageBody(data.body, isHTML: false)
+        vc.mailComposeDelegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: MFMailComposeViewController, context: Context) {}
+
+    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        let onFinish: (Result<MFMailComposeResult, Error>) -> Void
+        init(onFinish: @escaping (Result<MFMailComposeResult, Error>) -> Void) {
+            self.onFinish = onFinish
+        }
+        func mailComposeController(_ controller: MFMailComposeViewController,
+                                   didFinishWith result: MFMailComposeResult,
+                                   error: Error?) {
+            controller.dismiss(animated: true) { [self] in
+                if let error {
+                    onFinish(.failure(error))
+                } else {
+                    onFinish(.success(result))
+                }
+            }
+        }
+    }
+}
