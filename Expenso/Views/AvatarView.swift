@@ -43,7 +43,8 @@ struct AvatarView: View {
 }
 
 extension AvatarView {
-    /// Member から生成するヘルパー。
+    /// Member から生成するヘルパー (静的)。
+    /// Member が後から更新された時に自動で再描画したい場合は `ObservedMemberAvatar` を使う。
     init(member: Member, size: CGFloat = 40) {
         self.init(
             photoData: member.photoData,
@@ -61,5 +62,35 @@ extension AvatarView {
             colorHex: colorHex,
             size: size
         )
+    }
+}
+
+/// Member を `@ObservedObject` で監視し、プロフィール更新 (photoData / colorHex / name) に
+/// 自動で追従するアバター。Member が無い (= shared store の Expense 等) ケースでは
+/// 受け取った fallback で `AvatarView` を描く。
+struct ObservedMemberAvatar: View {
+    @ObservedObject var member: Member
+    var size: CGFloat = 40
+
+    var body: some View {
+        AvatarView(member: member, size: size)
+    }
+}
+
+/// 支払者アバター用ラッパー。Member が解決できればそれを観測、解決できなければ
+/// 名前+色から `AvatarView` を構築する。Expense 行のような所で共通利用する。
+struct PayerAvatar: View {
+    let member: Member?
+    let fallbackName: String
+    let fallbackColorHex: String
+    let fallbackPhoto: Data?
+    var size: CGFloat = 40
+
+    var body: some View {
+        if let member {
+            ObservedMemberAvatar(member: member, size: size)
+        } else {
+            AvatarView(name: fallbackName, colorHex: fallbackColorHex, photoData: fallbackPhoto, size: size)
+        }
     }
 }

@@ -571,10 +571,11 @@ private struct ExpenseRowView: View {
                 if showSubtitle {
                     HStack(spacing: 6) {
                         if let paidBy = expense.paidBy, !paidBy.isEmpty {
-                            AvatarView(
-                                name: paidBy,
-                                colorHex: (expense.resolvedPayer?.displayColorHex) ?? "#8E8E93",
-                                photoData: expense.payerPhotoData,
+                            PayerAvatar(
+                                member: expense.resolvedPayer,
+                                fallbackName: paidBy,
+                                fallbackColorHex: "#8E8E93",
+                                fallbackPhoto: nil,
                                 size: 16
                             )
                             Text(paidBy)

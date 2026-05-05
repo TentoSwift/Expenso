@@ -99,7 +99,7 @@ struct MemberPickerView: View {
                 dismiss()
             } label: {
                 HStack(spacing: 12) {
-                    AvatarView(member: me, size: 36)
+                    ObservedMemberAvatar(member: me, size: 36)
                     Text(me.displayName)
                         .foregroundStyle(.primary)
                     Text("自分")

@@ -69,6 +69,7 @@ struct StatsView: View {
 
     private struct PayerSummary: Identifiable {
         let name: String
+        let member: Member?
         let colorHex: String
         let photoData: Data?
         let tint: Color
@@ -90,6 +91,7 @@ struct StatsView: View {
             }
             return PayerSummary(
                 name: name,
+                member: resolved,
                 colorHex: resolved?.displayColorHex ?? "#8E8E93",
                 photoData: resolved?.photoData,
                 tint: resolved?.tint ?? .secondary,
@@ -352,10 +354,11 @@ struct StatsView: View {
                 .font(.headline)
             ForEach(byPayer) { item in
                 HStack {
-                    AvatarView(
-                        photoData: item.photoData,
-                        displayName: item.name,
-                        colorHex: item.colorHex,
+                    PayerAvatar(
+                        member: item.member,
+                        fallbackName: item.name,
+                        fallbackColorHex: item.colorHex,
+                        fallbackPhoto: item.photoData,
                         size: 28
                     )
                     Text(item.name)
