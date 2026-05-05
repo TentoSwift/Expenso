@@ -16,12 +16,14 @@ struct EditCategoryView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     let mode: Mode
+    var defaultKind: TransactionKind = .expense
     var onSave: ((ExpenseCategory) -> Void)? = nil
 
     @State private var name: String = ""
     @State private var selectedColor: String = "#FF9500"
     @State private var selectedSymbol: String = "fork.knife"
     @State private var customColor: Color = .orange
+    @State private var kind: TransactionKind = .expense
     @State private var didLoad: Bool = false
     @State private var showDeleteConfirm: Bool = false
 
@@ -44,6 +46,17 @@ struct EditCategoryView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if case .create = mode {
+                    Section {
+                        Picker("種別", selection: $kind) {
+                            ForEach(TransactionKind.allCases) { k in
+                                Label(k.label, systemImage: k.symbol).tag(k)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
                 Section("名前") {
                     TextField("例: コーヒー", text: $name)
                 }
@@ -167,11 +180,18 @@ struct EditCategoryView: View {
         didLoad = true
         switch mode {
         case .create:
+            kind = defaultKind
+            // 種別に応じて初期 symbol/color をデフォルト値に
+            if defaultKind == .income {
+                selectedColor = "#34C759"
+                selectedSymbol = "briefcase.fill"
+            }
             customColor = Color(hex: selectedColor) ?? .orange
         case .edit(let category):
             name = category.displayName
             selectedColor = category.displayColorHex
             selectedSymbol = category.displaySymbol
+            kind = category.kind
             customColor = Color(hex: selectedColor) ?? .gray
 
             origName = name
@@ -198,6 +218,7 @@ struct EditCategoryView: View {
             cat.name = trimmed
             cat.colorHex = selectedColor
             cat.symbol = selectedSymbol
+            cat.kindRaw = kind.rawValue
             cat.isBuiltIn = false
             cat.createdAt = .now
             cat.sortOrder = nextSortOrder(in: record)

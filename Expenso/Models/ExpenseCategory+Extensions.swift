@@ -12,4 +12,10 @@ extension ExpenseCategory {
     var displayColorHex: String { colorHex ?? "#888888" }
     var displaySymbol: String { symbol?.isEmpty == false ? symbol! : "ellipsis.circle" }
     var tint: Color { Color(hex: displayColorHex) ?? .gray }
+
+    /// このカテゴリの種別 (支出 / 収入)。デフォルトは支出。
+    var kind: TransactionKind {
+        get { TransactionKind(rawValue: kindRaw ?? "") ?? .expense }
+        set { kindRaw = newValue.rawValue }
+    }
 }

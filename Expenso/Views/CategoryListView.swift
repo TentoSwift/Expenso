@@ -27,53 +27,17 @@ struct CategoryListView: View {
         )
     }
 
+    private var expenseCategories: [ExpenseCategory] {
+        categories.filter { $0.kind == .expense }
+    }
+    private var incomeCategories: [ExpenseCategory] {
+        categories.filter { $0.kind == .income }
+    }
+
     var body: some View {
         List {
-            Section {
-                ForEach(categories) { cat in
-                    Button {
-                        editingCategory = cat
-                    } label: {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill(cat.tint.opacity(0.18))
-                                    .frame(width: 36, height: 36)
-                                Image(systemName: cat.displaySymbol)
-                                    .foregroundStyle(cat.tint)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(cat.displayName)
-                                    .foregroundStyle(.primary)
-                                if cat.isBuiltIn {
-                                    Text("デフォルト")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions {
-                        if !cat.isBuiltIn {
-                            Button(role: .destructive) {
-                                viewContext.delete(cat)
-                                PersistenceController.shared.save()
-                            } label: {
-                                Label("削除", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .onMove(perform: moveCategories)
-            } footer: {
-                Text("行を長押しすると並び替えできます。スワイプでカスタムカテゴリを削除できます。")
-                    .font(.caption2)
-            }
+            section(title: TransactionKind.expense.label, items: expenseCategories)
+            section(title: TransactionKind.income.label, items: incomeCategories)
         }
         .navigationTitle("\(record.displayName) のカテゴリ")
         .navigationBarTitleDisplayMode(.inline)
@@ -97,11 +61,62 @@ struct CategoryListView: View {
         }
     }
 
-    private func moveCategories(from source: IndexSet, to destination: Int) {
-        var items = Array(categories)
-        items.move(fromOffsets: source, toOffset: destination)
-        for (i, cat) in items.enumerated() {
-            cat.sortOrder = Int32(i)
+    @ViewBuilder
+    private func section(title: String, items: [ExpenseCategory]) -> some View {
+        Section {
+            ForEach(items, id: \.objectID) { cat in
+                Button {
+                    editingCategory = cat
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(cat.tint.opacity(0.18))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: cat.displaySymbol)
+                                .foregroundStyle(cat.tint)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(cat.displayName)
+                                .foregroundStyle(.primary)
+                            if cat.isBuiltIn {
+                                Text("デフォルト")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .swipeActions {
+                    if !cat.isBuiltIn {
+                        Button(role: .destructive) {
+                            viewContext.delete(cat)
+                            PersistenceController.shared.save()
+                        } label: {
+                            Label("削除", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .onMove { source, destination in
+                moveCategories(items: items, from: source, to: destination)
+            }
+        } header: {
+            Text(title)
+        }
+    }
+
+    private func moveCategories(items: [ExpenseCategory], from source: IndexSet, to destination: Int) {
+        var reordered = items
+        reordered.move(fromOffsets: source, toOffset: destination)
+        let baseSort = items.map(\.sortOrder).min() ?? 0
+        for (i, cat) in reordered.enumerated() {
+            cat.sortOrder = Int32(i) + baseSort
         }
         PersistenceController.shared.save()
     }

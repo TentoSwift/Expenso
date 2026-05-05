@@ -193,8 +193,8 @@ final class PersistenceController {
         if didChange { try? ctx.save() }
     }
 
-    /// シート専用のデフォルトカテゴリ10個を作成する。新規シート作成時、または
-    /// 既存シートにカテゴリが無い場合の補填として呼ぶ。
+    /// シート専用のデフォルトカテゴリ (支出 + 収入) を作成する。
+    /// 新規シート作成時、または既存シートにカテゴリが無い場合の補填として呼ぶ。
     static func seedDefaultCategories(for sheet: ExpenseSheet, in ctx: NSManagedObjectContext) {
         for (i, seed) in CategoryDefaults.seeds.enumerated() {
             let cat = ExpenseCategory(context: ctx)
@@ -202,7 +202,28 @@ final class PersistenceController {
             cat.name = seed.name
             cat.colorHex = seed.colorHex
             cat.symbol = seed.symbol
+            cat.kindRaw = seed.kind.rawValue
             cat.sortOrder = Int32(i)
+            cat.isBuiltIn = true
+            cat.createdAt = .now
+            cat.sheet = sheet
+        }
+    }
+
+    /// 既存シートに収入カテゴリが無ければ補填する (旧データ移行用)。
+    static func ensureIncomeSeedCategories(for sheet: ExpenseSheet, in ctx: NSManagedObjectContext) {
+        let existing = (sheet.categories as? Set<ExpenseCategory>) ?? []
+        let hasIncome = existing.contains(where: { ($0.kindRaw ?? "") == "income" })
+        if hasIncome { return }
+        let baseSort = (existing.map(\.sortOrder).max() ?? -1) + 1
+        for (i, seed) in CategoryDefaults.incomeSeeds.enumerated() {
+            let cat = ExpenseCategory(context: ctx)
+            cat.id = UUID()
+            cat.name = seed.name
+            cat.colorHex = seed.colorHex
+            cat.symbol = seed.symbol
+            cat.kindRaw = seed.kind.rawValue
+            cat.sortOrder = Int32(i) + baseSort
             cat.isBuiltIn = true
             cat.createdAt = .now
             cat.sheet = sheet
@@ -222,6 +243,11 @@ final class PersistenceController {
             if existing.isEmpty {
                 Self.seedDefaultCategories(for: sheet, in: ctx)
                 didChange = true
+            } else {
+                // 旧データに収入カテゴリが無ければ補填
+                let beforeCount = existing.count
+                Self.ensureIncomeSeedCategories(for: sheet, in: ctx)
+                if (sheet.categories as? Set<ExpenseCategory>)?.count != beforeCount { didChange = true }
             }
 
             // シート内のカテゴリ名一致で Expense を再リンク

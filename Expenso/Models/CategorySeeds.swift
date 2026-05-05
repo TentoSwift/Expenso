@@ -9,10 +9,12 @@ struct CategorySeed {
     let name: String
     let colorHex: String
     let symbol: String
+    var kind: TransactionKind = .expense
 }
 
 enum CategoryDefaults {
-    static let seeds: [CategorySeed] = [
+    /// 支出カテゴリ
+    static let expenseSeeds: [CategorySeed] = [
         .init(name: "食費", colorHex: "#FF9500", symbol: "fork.knife"),
         .init(name: "交通", colorHex: "#5B8DEF", symbol: "car.fill"),
         .init(name: "住居", colorHex: "#A2845E", symbol: "house.fill"),
@@ -25,7 +27,19 @@ enum CategoryDefaults {
         .init(name: "その他", colorHex: "#8E8E93", symbol: "ellipsis.circle.fill")
     ]
 
-    static let other = seeds.last!
+    /// 収入カテゴリ
+    static let incomeSeeds: [CategorySeed] = [
+        .init(name: "給料", colorHex: "#34C759", symbol: "briefcase.fill", kind: .income),
+        .init(name: "ボーナス", colorHex: "#30B0C7", symbol: "gift.fill", kind: .income),
+        .init(name: "副業", colorHex: "#FF9500", symbol: "hammer.fill", kind: .income),
+        .init(name: "投資", colorHex: "#5856D6", symbol: "chart.line.uptrend.xyaxis", kind: .income),
+        .init(name: "その他収入", colorHex: "#8E8E93", symbol: "plus.circle.fill", kind: .income)
+    ]
+
+    /// 互換用 (旧コード参照)
+    static let seeds: [CategorySeed] = expenseSeeds + incomeSeeds
+
+    static let other = expenseSeeds.last!
 
     /// アイコンピッカーで選択可能な SF Symbol カタログ
     static let availableSymbols: [String] = [

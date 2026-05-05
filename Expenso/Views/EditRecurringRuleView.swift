@@ -123,7 +123,7 @@ struct EditRecurringRuleView: View {
                 Section("カテゴリ") {
                     if let sheet = contextSheet {
                         NavigationLink {
-                            CategoryPickerView(selected: $selectedCategory, record: sheet)
+                            CategoryPickerView(selected: $selectedCategory, record: sheet, kind: kind)
                         } label: {
                             HStack {
                                 Text("カテゴリ")

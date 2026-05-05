@@ -146,6 +146,19 @@ struct AddExpenseView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: kind) { _, newKind in
+                        // 種別が変わったらカテゴリは新しい種別の最初のものに自動リセット
+                        if let sheet = contextSheet {
+                            let cats = (sheet.categories as? Set<ExpenseCategory>) ?? []
+                            let filtered = cats.filter { c in
+                                let raw = c.kindRaw ?? ""
+                                return raw == newKind.rawValue ||
+                                       (newKind == .expense && raw.isEmpty)
+                            }
+                            let sorted = filtered.sorted { $0.sortOrder < $1.sortOrder }
+                            selectedCategory = sorted.first
+                        }
+                    }
                 }
 
                 if case .create = mode {
@@ -203,7 +216,7 @@ struct AddExpenseView: View {
                 Section("カテゴリ") {
                     if let sheet = contextSheet {
                         NavigationLink {
-                            CategoryPickerView(selected: $selectedCategory, record: sheet)
+                            CategoryPickerView(selected: $selectedCategory, record: sheet, kind: kind)
                         } label: {
                             HStack {
                                 Text("カテゴリ")
