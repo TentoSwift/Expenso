@@ -37,15 +37,19 @@ struct SheetCalendarView: View {
         return calendar.date(from: comps) ?? anchorMonth
     }
 
-    /// 表示する 6 週分 (= 42 セル) の日付配列。月初の前後を含む。
+    /// 表示するカレンダーセル一覧。月の日数と先頭オフセットから、
+    /// 必要な週数 (4〜6 週) だけ描画して、不要な next-month の行を出さない。
     private var calendarCells: [Date] {
         let firstWeekday = calendar.firstWeekday  // 1=Sunday
         let monthFirstWeekday = calendar.component(.weekday, from: monthStart)
         let leading = (monthFirstWeekday - firstWeekday + 7) % 7
+        let daysInMonth = calendar.range(of: .day, in: .month, for: monthStart)?.count ?? 30
+        // 7 の倍数まで切り上げ (= 末尾の週を埋めるトレーリング)
+        let totalCells = ((leading + daysInMonth + 6) / 7) * 7
         guard let gridStart = calendar.date(byAdding: .day, value: -leading, to: monthStart) else {
             return []
         }
-        return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0, to: gridStart) }
+        return (0..<totalCells).compactMap { calendar.date(byAdding: .day, value: $0, to: gridStart) }
     }
 
     /// 当月の Expense 配列
@@ -97,16 +101,24 @@ struct SheetCalendarView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                monthHeader
-                weekdayRow
-                grid
-                if selectedDay != nil {
-                    selectedDaySection
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 16) {
+                    monthHeader
+                    weekdayRow
+                    grid
+                    if selectedDay != nil {
+                        selectedDaySection
+                            .id("selectedDaySection")
+                    }
+                }
+                .padding()
+            }
+            .onChange(of: selectedDay) { _, newValue in
+                if newValue != nil {
+                    withAnimation { proxy.scrollTo("selectedDaySection", anchor: .top) }
                 }
             }
-            .padding()
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("カレンダー")

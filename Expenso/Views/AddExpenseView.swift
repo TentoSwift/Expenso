@@ -193,7 +193,8 @@ struct AddExpenseView: View {
     }
 
     /// 現在の title 入力に基づいて、同シート内の過去 Expense を引いて候補を組み立てる。
-    /// 1 文字以下では何もしない (= ノイズ抑制)。
+    /// 現在の kind に一致する Expense だけを対象にすることで、ユーザーが既に選んだ
+    /// 種別 (支出 / 収入) を尊重する。1 文字以下では何もしない (= ノイズ抑制)。
     @MainActor
     private func recomputeTitleSuggestion() {
         guard case .create(let sheet) = mode else {
@@ -207,8 +208,8 @@ struct AddExpenseView: View {
         }
         let req = NSFetchRequest<Expense>(entityName: "Expense")
         req.predicate = NSPredicate(
-            format: "sheet == %@ AND title CONTAINS[c] %@",
-            sheet, trimmed
+            format: "sheet == %@ AND title CONTAINS[c] %@ AND kindRaw == %@",
+            sheet, trimmed, kind.rawValue
         )
         req.sortDescriptors = [NSSortDescriptor(keyPath: \Expense.date, ascending: false)]
         req.fetchLimit = 30
@@ -218,35 +219,30 @@ struct AddExpenseView: View {
             return
         }
 
-        // 最頻 kind
-        let kindCounts = Dictionary(grouping: results, by: { $0.kind })
-        let topKind = kindCounts.max(by: { $0.value.count < $1.value.count })?.key ?? .expense
-
-        // 最頻カテゴリ (objectID で集計、kind 一致)
-        let kindResults = results.filter { $0.kind == topKind }
-        let categoryCounts = Dictionary(grouping: kindResults, by: { $0.category?.objectID })
+        // 最頻カテゴリ (objectID で集計)
+        let categoryCounts = Dictionary(grouping: results, by: { $0.category?.objectID })
         let topCategoryID = categoryCounts
             .filter { $0.key != nil }
             .max(by: { $0.value.count < $1.value.count })?.key
-        let topCategory: ExpenseCategory? = kindResults
+        let topCategory: ExpenseCategory? = results
             .first(where: { $0.category?.objectID == topCategoryID })?.category
 
-        // 中央値 (kind 一致、0 以外)
-        let amounts = kindResults.map { $0.amountDecimal }.filter { $0 > 0 }.sorted()
+        // 中央値 (0 以外)
+        let amounts = results.map { $0.amountDecimal }.filter { $0 > 0 }.sorted()
         let medianAmount: Decimal? = amounts.isEmpty ? nil : amounts[amounts.count / 2]
 
         // 最頻 payer
-        let payerCounts = Dictionary(grouping: kindResults, by: { $0.payerProfileID ?? "" })
+        let payerCounts = Dictionary(grouping: results, by: { $0.payerProfileID ?? "" })
         let topPayerKey = payerCounts
             .filter { !$0.key.isEmpty }
             .max(by: { $0.value.count < $1.value.count })?.key
-        let topPayerExpense = kindResults
+        let topPayerExpense = results
             .first(where: { ($0.payerProfileID ?? "") == (topPayerKey ?? "") })
 
         titleSuggestion = TitleSuggestion(
             category: topCategory,
             amount: medianAmount,
-            kind: topKind,
+            kind: kind,
             payerName: topPayerExpense?.paidBy,
             payerProfileID: topPayerKey,
             payerMemberID: topPayerExpense?.payerMemberID,
@@ -255,7 +251,7 @@ struct AddExpenseView: View {
     }
 
     /// サジェストを適用。空 / デフォルト値のフィールドのみ書き換える (= ユーザーが既に
-    /// 入力したものは尊重する)。
+    /// 入力したものは尊重する)。kind は現在の値を使うので変更しない。
     @MainActor
     private func applySuggestion(_ s: TitleSuggestion) {
         if amountText.isEmpty, let amt = s.amount {
@@ -271,9 +267,6 @@ struct AddExpenseView: View {
             if let m = (try? viewContext.fetch(req))?.first {
                 selectedPayer = m
             }
-        }
-        if kind != s.kind {
-            kind = s.kind
         }
         Haptics.success()
     }
@@ -394,7 +387,10 @@ struct AddExpenseView: View {
                         // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
                         // (編集ロード時に State が `.expense` 既定値 → `.income` に変わって onChange が
                         //  発火するレースで、復元したばかりのカテゴリが上書きされるのを防ぐ)
-                        if let cur = selectedCategory, cur.kind == newKind { return }
+                        if let cur = selectedCategory, cur.kind == newKind {
+                            recomputeTitleSuggestion()
+                            return
+                        }
                         // 種別が変わって既存カテゴリが合わない時だけ、新 kind の先頭カテゴリにリセット
                         if let sheet = contextSheet {
                             let cats = (sheet.categories as? Set<ExpenseCategory>) ?? []
@@ -406,6 +402,8 @@ struct AddExpenseView: View {
                             let sorted = filtered.sorted { $0.sortOrder < $1.sortOrder }
                             selectedCategory = sorted.first
                         }
+                        // 新 kind に合った候補を引き直す
+                        recomputeTitleSuggestion()
                     }
                 }
 
