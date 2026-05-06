@@ -44,6 +44,8 @@ struct SheetDetailView: View {
     @State private var showingEditGroup = false
     @State private var searchText: String = ""
     @State private var selectedCategory: ExpenseCategory?
+    @State private var demoOpenCalendar: Bool = false
+    @State private var demoOpenTemplates: Bool = false
     @AppStorage("expenseSortOption") private var sortOptionRaw: String = SortOption.dateDesc.rawValue
 
     /// シート配下の Expense を直接観測。`record.expenses` 経由だと子の attribute 変更
@@ -201,8 +203,18 @@ struct SheetDetailView: View {
             case "editGroup": showingEditGroup = true
             case "editExpense":
                 if let first = allExpenses.first { editingExpense = first }
+            case "calendar":
+                demoOpenCalendar = true
+            case "templates":
+                demoOpenTemplates = true
             default: break
             }
+        }
+        .navigationDestination(isPresented: $demoOpenCalendar) {
+            SheetCalendarView(record: record)
+        }
+        .navigationDestination(isPresented: $demoOpenTemplates) {
+            TemplateListView(record: record)
         }
     }
 
