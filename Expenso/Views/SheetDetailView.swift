@@ -169,6 +169,11 @@ struct SheetDetailView: View {
                     } label: {
                         Label("定期項目", systemImage: "repeat")
                     }
+                    NavigationLink {
+                        TemplateListView(record: record)
+                    } label: {
+                        Label("テンプレ", systemImage: "doc.on.doc")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }

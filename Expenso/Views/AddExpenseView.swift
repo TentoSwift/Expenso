@@ -38,6 +38,8 @@ struct AddExpenseView: View {
     @State private var didLoad: Bool = false
     @State private var showCameraScanner: Bool = false
     @State private var showPhotoScanner: Bool = false
+    @State private var showingTemplatePicker: Bool = false
+    @State private var showingSaveTemplateConfirm: Bool = false
 
     // 編集モードの「ロード時スナップショット」。save 時に現在値と比較し、
     // 差分のあるフィールドだけを Expense に書き戻す (= ユーザーが触らなかった
@@ -287,6 +289,20 @@ struct AddExpenseView: View {
                         Text("レシートを撮影すると、店名・金額・日付を自動で入力します。読み取り後に内容を確認・修正してください。")
                             .font(.caption2)
                     }
+
+                    Section {
+                        Button {
+                            showingTemplatePicker = true
+                        } label: {
+                            Label("テンプレから入力", systemImage: "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    } footer: {
+                        Text("よく使う支出をテンプレに保存しておくと、ワンタップで内容が入力されます。")
+                            .font(.caption2)
+                    }
                 }
 
                 Section("内容") {
@@ -389,6 +405,18 @@ struct AddExpenseView: View {
                         .lineLimit(2...4)
                 }
 
+                if case .create = mode, canSave {
+                    Section {
+                        Button {
+                            showingSaveTemplateConfirm = true
+                        } label: {
+                            Label("現在の内容をテンプレに保存", systemImage: "square.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
                 if case .edit(let expense) = mode {
                     Section {
                         Button(role: .destructive) {
@@ -424,6 +452,23 @@ struct AddExpenseView: View {
                 Button("キャンセル", role: .cancel) {}
             } message: {
                 Text("この支出は定期項目から生成されています。変更をどこまで反映するか選んでください。")
+            }
+            .confirmationDialog(
+                "「\(title.trimmingCharacters(in: .whitespaces))」をテンプレに保存しますか?",
+                isPresented: $showingSaveTemplateConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("保存") { saveCurrentAsTemplate() }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("テンプレは「定期項目」メニューから管理できます。日付以外の入力内容が保存されます。")
+            }
+            .sheet(isPresented: $showingTemplatePicker) {
+                if let sheet = contextSheet {
+                    TemplatePickerView(record: sheet) { tpl in
+                        applyTemplate(tpl)
+                    }
+                }
             }
             .onAppear { loadIfNeeded() }
             .fullScreenCover(isPresented: $showCameraScanner) {
@@ -750,6 +795,72 @@ struct AddExpenseView: View {
             rule.lastGeneratedDate = Calendar.current.startOfDay(for: date)
             expense.generatedFromRuleID = rule.id
         }
+    }
+
+    // MARK: - Templates
+
+    /// テンプレを選んだ時にフォーム値を上書きする (= ユーザーは保存ボタンを押すまで反映されない)。
+    @MainActor
+    private func applyTemplate(_ tpl: ExpenseTemplate) {
+        title = tpl.displayTitle == "(無題)" ? "" : tpl.displayTitle
+        if tpl.amountDecimal > 0 {
+            amountText = NSDecimalNumber(decimal: tpl.amountDecimal).stringValue
+        }
+        kind = tpl.kind
+        currencyCode = tpl.resolvedCurrencyCode
+        note = tpl.note ?? ""
+        if let cat = tpl.resolvedCategory { selectedCategory = cat }
+        if let mid = tpl.payerMemberID {
+            let req = NSFetchRequest<Member>(entityName: "Member")
+            req.predicate = NSPredicate(format: "id == %@", mid as CVarArg)
+            req.fetchLimit = 1
+            if let m = (try? viewContext.fetch(req))?.first {
+                selectedPayer = m
+            }
+        }
+        let csv = (tpl.beneficiaryProfileIDs ?? "")
+        if !csv.isEmpty {
+            selectedBeneficiaries = Set(tpl.beneficiaryIDList)
+        }
+    }
+
+    /// 現在の入力内容をテンプレとして保存する。
+    /// (日付・受益者の自動均等割りは含めず、それ以外を保存)
+    @MainActor
+    private func saveCurrentAsTemplate() {
+        guard case .create(let sheet) = mode else { return }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmedTitle.isEmpty else { return }
+
+        let tpl = ExpenseTemplate(context: viewContext)
+        if let store = sheet.objectID.persistentStore {
+            viewContext.assign(tpl, to: store)
+        }
+        tpl.id = UUID()
+        tpl.createdAt = .now
+        tpl.sheet = sheet
+        tpl.title = trimmedTitle
+        if let amt = amountDecimal {
+            tpl.amount = NSDecimalNumber(decimal: amt)
+        }
+        tpl.kindRaw = kind.rawValue
+        tpl.currencyCode = currencyCode
+        tpl.categoryRaw = selectedCategory?.name
+        tpl.paidBy = selectedPayer?.name
+        tpl.payerProfileID = selectedPayer?.profileID
+        tpl.payerMemberID = selectedPayer?.id
+        tpl.note = note
+        tpl.beneficiaryProfileIDs = selectedBeneficiaryCSV
+        // sortOrder は最大 + 1
+        let req = NSFetchRequest<ExpenseTemplate>(entityName: "ExpenseTemplate")
+        req.predicate = NSPredicate(format: "sheet == %@", sheet)
+        req.sortDescriptors = [NSSortDescriptor(keyPath: \ExpenseTemplate.sortOrder, ascending: false)]
+        req.fetchLimit = 1
+        let nextOrder = ((try? viewContext.fetch(req))?.first?.sortOrder ?? -1) + 1
+        tpl.sortOrder = nextOrder
+
+        PersistenceController.shared.save()
+        Haptics.success()
     }
 
     /// 現在のフォーム値から RecurringRule を作成する (シートと同じストアに割り当て)。
