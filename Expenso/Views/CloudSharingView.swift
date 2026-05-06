@@ -96,6 +96,7 @@ struct CloudSharingView: View {
             groupHeader
             if let share = existingShare {
                 participantsSection(share: share)
+                shareIDSection(share: share)
             }
             inviteSection
             shareLinkSection
@@ -124,6 +125,7 @@ struct CloudSharingView: View {
 
             if let share = existingShare, !share.participants.isEmpty {
                 participantsSection(share: share)
+                shareIDSection(share: share)
             } else {
                 Section {
                     HStack(spacing: 10) {
@@ -286,6 +288,47 @@ struct CloudSharingView: View {
     private func fetchAllParticipantProfiles(_ share: CKShare) async {
         // ParticipantProfile は Core Data + CloudKit Sharing 経由で自動同期されるため、
         // 明示的なプロフェッチは不要 (互換のため空実装で残す)。
+    }
+
+    @ViewBuilder
+    private func shareIDSection(share: CKShare) -> some View {
+        let recordName = share.recordID.recordName
+        let zoneName = share.recordID.zoneID.zoneName
+        let ownerName = share.recordID.zoneID.ownerName
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                row(label: "Record", value: recordName)
+                row(label: "Zone", value: zoneName)
+                row(label: "Owner", value: ownerName)
+            }
+            Button {
+                UIPasteboard.general.string = recordName
+                withAnimation { showCopiedToast = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    withAnimation { showCopiedToast = false }
+                }
+            } label: {
+                Label("Record ID をコピー", systemImage: "doc.on.doc")
+                    .font(.caption)
+            }
+        } header: {
+            Text("CKShare ID")
+        }
+    }
+
+    private func row(label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .foregroundStyle(.primary)
+        }
     }
 
     private var inviteSection: some View {
@@ -516,12 +559,38 @@ private struct ParticipantRow: View {
     let onPermissionChange: (CKShare.ParticipantPermission) async -> Void
     let onRemove: () async -> Void
 
+    @ObservedObject private var userProfile = UserProfileStore.shared
+
     private var recordName: String? {
         guard let rn = participant.userIdentity.userRecordID?.recordName,
               !rn.isEmpty,
               rn != "_defaultOwner_",
               rn != "__defaultOwner__" else { return nil }
         return rn
+    }
+
+    /// この行が現在の iCloud ユーザー (= 自分) を表すか。
+    /// CKShare の currentUserParticipant と同じ判定になるよう userRecordName で比較する。
+    /// 自分がオーナーの場合、CKShare 上の recordName は `_defaultOwner_` プレースホルダ
+    /// になるため、role == .owner + sheet が自分の所有 もケースとして拾う。
+    private var isSelf: Bool {
+        if let myRN = userProfile.userRecordName, !myRN.isEmpty, recordName == myRN {
+            return true
+        }
+        if participant.role == .owner, sheet.isOwnedByCurrentUser {
+            return true
+        }
+        return false
+    }
+
+    /// 表示用 recordName。`_defaultOwner_` プレースホルダの場合は `UserProfileStore` に
+    /// キャッシュされている実 recordName をフォールバックに使う。
+    private var displayedRecordName: String? {
+        if let rn = recordName { return rn }
+        if isSelf, let myRN = userProfile.userRecordName, !myRN.isEmpty {
+            return myRN
+        }
+        return nil
     }
 
     private var emailAddress: String? {
@@ -540,6 +609,12 @@ private struct ParticipantRow: View {
     }
 
     private var primaryText: String {
+        // 自分の行は UserProfileStore からローカルプロフィールを採用する。
+        // ParticipantProfile は他のユーザー向けに自分のプロフィールを propagate する仕組みであり、
+        // 自分自身の sheet では空のことがあるため。
+        if isSelf {
+            return userProfile.resolvedDisplayName
+        }
         if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return n
         }
@@ -557,6 +632,9 @@ private struct ParticipantRow: View {
     }
 
     private var secondaryText: String? {
+        if isSelf {
+            return emailAddress
+        }
         if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return emailAddress
         }
@@ -564,6 +642,9 @@ private struct ParticipantRow: View {
     }
 
     private var avatarColorHex: String {
+        if isSelf, let hex = userProfile.avatarBgColorHex, !hex.isEmpty {
+            return hex
+        }
         if isAccepted, let hex = participantProfile?.colorHex, !hex.isEmpty {
             return hex
         }
@@ -596,7 +677,14 @@ private struct ParticipantRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                if let pp = participantProfile {
+                if isSelf {
+                    AvatarView(
+                        photoData: userProfile.photoData,
+                        displayName: primaryText,
+                        colorHex: avatarColorHex,
+                        size: 40
+                    )
+                } else if let pp = participantProfile {
                     ObservedParticipantProfileAvatar(profile: pp, size: 40)
                 } else {
                     AvatarView(
@@ -627,6 +715,14 @@ private struct ParticipantRow: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if let rn = displayedRecordName {
+                        Text(rn)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
                 }
                 Spacer()
             }

@@ -55,10 +55,13 @@ struct ShareStatusBadge: View {
             return
         }
         if myRole == .owner {
-            // 自分がオーナー: 他に参加者がいる、もしくは公開リンクが有効なら「共有中」
-            let hasOthers = share.participants.contains(where: { $0.role != .owner })
+            // 自分がオーナー: 参加済み (acceptanceStatus == .accepted) のメンバーがいる、
+            // もしくは公開リンクが有効なら「共有中」。招待中だけの状態では表示しない。
+            let hasAcceptedOthers = share.participants.contains(where: {
+                $0.role != .owner && $0.acceptanceStatus == .accepted
+            })
             let isPubliclyShared = share.publicPermission != .none
-            status = (hasOthers || isPubliclyShared) ? .ownerSharing : .none
+            status = (hasAcceptedOthers || isPubliclyShared) ? .ownerSharing : .none
         } else {
             // 自分は招待された側
             status = .participant
