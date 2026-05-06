@@ -71,7 +71,7 @@ final class PurchaseManager: ObservableObject {
     }
 
     init() {
-        updateListener = Task { [weak self] in
+        updateListener = Task { @MainActor [weak self] in
             await self?.refreshEntitlements()
             await self?.listenForUpdates()
         }
