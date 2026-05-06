@@ -278,8 +278,10 @@ struct AddExpenseView: View {
         req.sortDescriptors = [NSSortDescriptor(keyPath: \Expense.date, ascending: false)]
         req.fetchLimit = 30
         let results = (try? viewContext.fetch(req)) ?? []
+        // 過去マッチが 0 件 → 履歴サジェストはなしだが、AI 提案は試す価値あり
         guard !results.isEmpty else {
             titleSuggestion = nil
+            kickAICategorySuggest(title: trimmed, in: sheet)
             return
         }
 
