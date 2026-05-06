@@ -24,6 +24,14 @@ struct RecurringListView: View {
         )
     }
 
+    private var expenseRules: [RecurringRule] {
+        rules.filter { $0.kind == .expense }
+    }
+
+    private var incomeRules: [RecurringRule] {
+        rules.filter { $0.kind == .income }
+    }
+
     var body: some View {
         Group {
             if rules.isEmpty {
@@ -41,15 +49,8 @@ struct RecurringListView: View {
                 }
             } else {
                 List {
-                    ForEach(rules) { rule in
-                        Button {
-                            editingRule = rule
-                        } label: {
-                            RecurringRow(rule: rule)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onDelete(perform: deleteRules)
+                    section(title: TransactionKind.expense.label, items: expenseRules)
+                    section(title: TransactionKind.income.label, items: incomeRules)
                 }
             }
         }
@@ -72,9 +73,28 @@ struct RecurringListView: View {
         }
     }
 
-    private func deleteRules(at offsets: IndexSet) {
+    @ViewBuilder
+    private func section(title: String, items: [RecurringRule]) -> some View {
+        if !items.isEmpty {
+            Section(title) {
+                ForEach(items) { rule in
+                    Button {
+                        editingRule = rule
+                    } label: {
+                        RecurringRow(rule: rule, sheet: record)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete { offsets in
+                    deleteRules(items: items, at: offsets)
+                }
+            }
+        }
+    }
+
+    private func deleteRules(items: [RecurringRule], at offsets: IndexSet) {
         withAnimation {
-            offsets.map { rules[$0] }.forEach(viewContext.delete)
+            offsets.map { items[$0] }.forEach(viewContext.delete)
             PersistenceController.shared.save()
             Haptics.warning()
         }
@@ -83,24 +103,43 @@ struct RecurringListView: View {
 
 private struct RecurringRow: View {
     @ObservedObject var rule: RecurringRule
+    let sheet: ExpenseSheet
+
+    /// Rule.categoryRaw からシートの ExpenseCategory を引く。無ければ nil。
+    private var resolvedCategory: ExpenseCategory? {
+        guard let raw = rule.categoryRaw, !raw.isEmpty,
+              let cats = sheet.categories as? Set<ExpenseCategory> else { return nil }
+        return cats.first(where: { $0.name == raw })
+    }
+
+    private var icon: some View {
+        Group {
+            if let cat = resolvedCategory {
+                CategoryIconView(category: cat, size: 36)
+            } else {
+                CategoryIconView(symbol: "ellipsis.circle", tint: .gray, size: 36)
+            }
+        }
+    }
+
+    private var categoryName: String {
+        resolvedCategory?.displayName ?? (rule.categoryRaw?.isEmpty == false ? rule.categoryRaw! : "未分類")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(rule.kind == .income ? Color.green.opacity(0.18) : Color.red.opacity(0.18))
-                    .frame(width: 36, height: 36)
-                Image(systemName: "repeat")
-                    .foregroundStyle(rule.kind == .income ? .green : .red)
-                    .font(.callout.weight(.semibold))
-            }
+            icon
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.displayTitle.isEmpty ? "(無題)" : rule.displayTitle)
                     .font(.body)
                 HStack(spacing: 6) {
+                    Image(systemName: "repeat")
                     Text(rule.resolvedFrequency.summary(interval: rule.resolvedInterval))
+                    Text("·")
+                    Text(categoryName)
                     if let next = rule.nextOccurrence {
-                        Text("· 次回 \(formatted(next))")
+                        Text("·")
+                        Text("次回 \(formatted(next))")
                     }
                 }
                 .font(.caption2)

@@ -73,29 +73,26 @@ final class PersistenceController {
             }
         }
 
-        // 既存ストアが現在のモデル/configuration と互換でなければ破棄して作り直す。
-        // (configuration 名の変更や entity セット変更で発生する
-        //  "The model configuration used to open the store is incompatible..." エラーを自動回復)
-        if !inMemory {
-            // 前回の save() で configuration mismatch が起きた場合は無条件で wipe する。
-            // (load 時のメタデータ比較では取りこぼされるケースの保険)
-            if UserDefaults.standard.bool(forKey: Self.storeNeedsResetKey) {
-                for description in container.persistentStoreDescriptions {
-                    if let url = description.url {
-                        try? Self.deleteSQLiteFiles(at: url)
-                    }
-                }
-                UserDefaults.standard.removeObject(forKey: Self.storeNeedsResetKey)
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .expensoStoreReset,
-                        object: nil,
-                        userInfo: ["message": "前回の保存エラーを検出したためデータベースをリセットしました。"]
-                    )
+        // 前回の save() で configuration mismatch (= entity セット変更等で本当に互換不能) が
+        // 起きていた場合だけ、無条件で wipe する。
+        // 通常のスキーマ変更 (新しい optional 属性追加など) は Core Data の lightweight migration
+        // (`shouldMigrateStoreAutomatically + shouldInferMappingModelAutomatically`) に任せる。
+        // 起動時の version-hash 比較で先回り wipe すると、互換可能な変更でも一律にユーザーデータ
+        // (= 共有や CKShare メタデータ含む) を吹き飛ばしてしまうため行わない。
+        if !inMemory, UserDefaults.standard.bool(forKey: Self.storeNeedsResetKey) {
+            for description in container.persistentStoreDescriptions {
+                if let url = description.url {
+                    try? Self.deleteSQLiteFiles(at: url)
                 }
             }
-            Self.resetIncompatibleStoresIfNeeded(model: container.managedObjectModel,
-                                                 descriptions: container.persistentStoreDescriptions)
+            UserDefaults.standard.removeObject(forKey: Self.storeNeedsResetKey)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .expensoStoreReset,
+                    object: nil,
+                    userInfo: ["message": "前回の保存エラーを検出したためデータベースをリセットしました。"]
+                )
+            }
         }
 
         let privateURL = baseDescription.url
@@ -127,8 +124,10 @@ final class PersistenceController {
 
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-
-        try? container.viewContext.setQueryGenerationFrom(.current)
+        // setQueryGenerationFrom(.current) は付けない。これを付けると viewContext が起動時点の
+        // レコード集合に pin され、CloudKit が import した他端末の Expense / Sheet 等が
+        // automaticallyMergesChangesFromParent を経ても auto-advance されず、再起動するまで
+        // 見えなくなる。pinning 無しでも auto-merge は問題なく機能する。
 
         // 一度きりの seed/migration はリビジョン番号でガード。次回起動以降は走らせない。
         runOneTimeMigrationsIfNeeded()

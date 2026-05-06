@@ -57,6 +57,27 @@ struct AddExpenseView: View {
     /// 収入では使わない (精算対象外)。
     @State private var selectedBeneficiaries: Set<String> = []
 
+    // MARK: - Recurring (繰り返し)
+
+    @State private var isRecurring: Bool = false
+    @State private var frequency: RecurrenceFrequency = .monthly
+    @State private var recurringInterval: Int = 1
+    @State private var hasEndDate: Bool = false
+    @State private var endDate: Date = .now
+
+    /// 編集モードでの CRDT スナップショット。Rule の更新は差分のみ書き戻す。
+    @State private var origIsRecurring: Bool = false
+    @State private var origFrequencyRaw: String = ""
+    @State private var origRecurringInterval: Int32 = 1
+    @State private var origEndDate: Date? = nil
+
+    /// 編集中の Expense が既に Rule から生成されている場合、Toggle をロックする。
+    /// (定期項目から外したい時は「定期項目」一覧から rule を直接削除する運用)
+    private var isRecurringLocked: Bool {
+        if case .edit(let expense) = mode, expense.generatedFromRuleID != nil { return true }
+        return false
+    }
+
     /// 定期項目から生成された支出を編集中、保存ボタンを押した時に出る 3 択ダイアログ。
     @State private var showRecurringSaveChoice: Bool = false
 
@@ -107,6 +128,43 @@ struct AddExpenseView: View {
             return p.isEmpty ? nil : p
         }
         return nil
+    }
+
+    @ViewBuilder
+    private var recurringSection: some View {
+        Section {
+            Toggle("繰り返し", isOn: $isRecurring)
+                .disabled(isRecurringLocked)
+            if isRecurring {
+                Picker("頻度", selection: $frequency) {
+                    ForEach(RecurrenceFrequency.allCases) { f in
+                        Text(f.label).tag(f)
+                    }
+                }
+                Stepper(value: $recurringInterval, in: 1...60) {
+                    HStack {
+                        Text("間隔")
+                        Spacer()
+                        Text(frequency.summary(interval: recurringInterval))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle("終了日を設定", isOn: $hasEndDate)
+                if hasEndDate {
+                    DatePicker("終了日", selection: $endDate, in: date..., displayedComponents: [.date])
+                }
+            }
+        } header: {
+            Text("繰り返し")
+        } footer: {
+            if isRecurringLocked {
+                Text("この項目は定期項目から自動生成されました。「定期項目」一覧から Rule を削除すると繰り返しを止められます。")
+                    .font(.caption2)
+            } else if isRecurring {
+                Text("この日付を開始日として、未生成分を自動的にシートに追加します。")
+                    .font(.caption2)
+            }
+        }
     }
 
     /// 受益者ピッカーのプレビュー文字列。空 = 全員均等、それ以外 = 「N 人選択中: 名前1, 名前2...」。
@@ -185,7 +243,11 @@ struct AddExpenseView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: kind) { _, newKind in
-                        // 種別が変わったらカテゴリは新しい種別の最初のものに自動リセット
+                        // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
+                        // (編集ロード時に State が `.expense` 既定値 → `.income` に変わって onChange が
+                        //  発火するレースで、復元したばかりのカテゴリが上書きされるのを防ぐ)
+                        if let cur = selectedCategory, cur.kind == newKind { return }
+                        // 種別が変わって既存カテゴリが合わない時だけ、新 kind の先頭カテゴリにリセット
                         if let sheet = contextSheet {
                             let cats = (sheet.categories as? Set<ExpenseCategory>) ?? []
                             let filtered = cats.filter { c in
@@ -260,8 +322,7 @@ struct AddExpenseView: View {
                                 Text("カテゴリ")
                                 Spacer()
                                 if let cat = selectedCategory {
-                                    Image(systemName: cat.displaySymbol)
-                                        .foregroundStyle(cat.tint)
+                                    CategoryIconView(category: cat, size: 24)
                                     Text(cat.displayName)
                                         .foregroundStyle(.secondary)
                                 } else {
@@ -320,6 +381,8 @@ struct AddExpenseView: View {
                             .font(.caption2)
                     }
                 }
+
+                recurringSection
 
                 Section("メモ (任意)") {
                     TextField("詳細", text: $note, axis: .vertical)
@@ -512,7 +575,11 @@ struct AddExpenseView: View {
             }
         }
 
+        // 繰り返しの頻度・間隔・終了日の変更は scope に関わらず常に Rule に反映
+        applyRecurringChanges(for: expense)
+
         PersistenceController.shared.save()
+        RecurringExpenseGenerator.generateAll(in: viewContext)
         Haptics.success()
         dismiss()
     }
@@ -571,6 +638,19 @@ struct AddExpenseView: View {
             note = expense.note ?? ""
             selectedBeneficiaries = Set(expense.beneficiaryIDList)
 
+            // 繰り返し state 復元 (関連 Rule があればその値、無ければ既定値で OFF)
+            if let rule = expense.relatedRule {
+                isRecurring = true
+                frequency = rule.resolvedFrequency
+                recurringInterval = Int(rule.resolvedInterval)
+                if let end = rule.endDate {
+                    hasEndDate = true
+                    endDate = end
+                }
+            } else {
+                isRecurring = false
+            }
+
             // CRDT 用スナップショット
             origTitle = title
             origAmountText = amountText
@@ -581,6 +661,10 @@ struct AddExpenseView: View {
             origDate = expense.date ?? .distantPast
             origNote = expense.note ?? ""
             origBeneficiaryCSV = selectedBeneficiaryCSV
+            origIsRecurring = isRecurring
+            origFrequencyRaw = frequency.rawValue
+            origRecurringInterval = Int32(recurringInterval)
+            origEndDate = hasEndDate ? endDate : nil
         }
     }
 
@@ -619,13 +703,76 @@ struct AddExpenseView: View {
             }
             // 自分の ParticipantProfile を同シートに ensure (まだ無ければ作成、あれば更新)
             profile.ensureProfile(in: record, ctx: viewContext)
+
+            // 繰り返し ON: Rule を作成して、この Expense を「最初の occurrence」として連結する。
+            if isRecurring {
+                let rule = makeRule(in: record, startDate: date, amount: amountDecimal)
+                rule.lastGeneratedDate = Calendar.current.startOfDay(for: date)
+                expense.generatedFromRuleID = rule.id
+            }
         case .edit(let expense):
             // 通常編集 (定期項目以外、または「この項目のみ」)。差分のみ書き戻し。
             viewContext.refresh(expense, mergeChanges: true)
             applyChanges(toExpense: expense, includeDate: true)
+
+            // 繰り返し関連の差分を反映 (Rule の作成 / 更新)
+            applyRecurringChanges(for: expense)
         }
-        PersistenceController.shared.save()
+        pc.save()
+        // 繰り返しが付いた可能性があるので generator を回して未生成分を作る
+        RecurringExpenseGenerator.generateAll(in: viewContext)
         Haptics.success()
         dismiss()
+    }
+
+    /// 繰り返し関連のフィールドを Rule に反映する。
+    /// - 編集前は Rule 無しで、ON にした → Rule を新規作成して expense を最初の occurrence として連結
+    /// - 既に Rule あり → 頻度・間隔・終了日の差分を Rule に書き戻し
+    /// (Toggle が OFF にされるケースは isRecurringLocked で UI 側でブロック)
+    private func applyRecurringChanges(for expense: Expense) {
+        guard let sheet = expense.sheet else { return }
+        if let rule = expense.relatedRule {
+            // 既存 Rule の頻度・間隔・終了日を CRDT 差分で更新
+            if frequency.rawValue != origFrequencyRaw {
+                rule.frequency = frequency.rawValue
+            }
+            if Int32(recurringInterval) != origRecurringInterval {
+                rule.interval = Int32(recurringInterval)
+            }
+            let newEnd: Date? = hasEndDate ? Calendar.current.startOfDay(for: endDate) : nil
+            if newEnd != origEndDate {
+                rule.endDate = newEnd
+            }
+        } else if isRecurring, !origIsRecurring,
+                  let amount = amountDecimal {
+            // 単発 Expense を繰り返しに変換 (option 2-i)
+            let rule = makeRule(in: sheet, startDate: date, amount: amount)
+            rule.lastGeneratedDate = Calendar.current.startOfDay(for: date)
+            expense.generatedFromRuleID = rule.id
+        }
+    }
+
+    /// 現在のフォーム値から RecurringRule を作成する (シートと同じストアに割り当て)。
+    private func makeRule(in sheet: ExpenseSheet, startDate: Date, amount: Decimal) -> RecurringRule {
+        let rule = RecurringRule(context: viewContext)
+        if let store = sheet.objectID.persistentStore {
+            viewContext.assign(rule, to: store)
+        }
+        rule.id = UUID()
+        rule.createdAt = .now
+        rule.sheet = sheet
+        rule.title = title.trimmingCharacters(in: .whitespaces)
+        rule.amount = NSDecimalNumber(decimal: amount)
+        rule.kindRaw = kind.rawValue
+        rule.currencyCode = currencyCode
+        rule.categoryRaw = selectedCategory?.name
+        rule.paidBy = selectedPayer?.name
+        rule.payerProfileID = selectedPayer?.profileID
+        rule.note = note
+        rule.frequency = frequency.rawValue
+        rule.interval = Int32(recurringInterval)
+        rule.startDate = Calendar.current.startOfDay(for: startDate)
+        rule.endDate = hasEndDate ? Calendar.current.startOfDay(for: endDate) : nil
+        return rule
     }
 }

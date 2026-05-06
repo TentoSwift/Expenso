@@ -174,8 +174,8 @@ struct MemberPickerView: View {
     }
 
     private func ensureSelfMemberAndSelect() {
-        // applyToSelfMember が selfMemberID を保証 + Member を作成/更新する
-        profile.applyToSelfMember(in: viewContext)
+        // ローカル Member を確保 (selfMemberID キャッシュも更新される)
+        profile.ensureSelfMemberExists(in: viewContext)
         if let id = profile.selfMemberID,
            let me = allMembers.first(where: { $0.id == id }) {
             selected = me

@@ -154,32 +154,13 @@ final class PurchaseManager: ObservableObject {
         let nowPremium = !ids.intersection(Self.premiumProductIDs).isEmpty
         UserDefaults.standard.set(nowPremium, forKey: Self.isPremiumKey)
 
+        // Premium が切れた検出時は通知だけ出して、既存の共有は触らない。
+        // 自動 revoke は StoreKit の transient 失敗 (currentEntitlements が一時的に空) で
+        // 本物の Premium ユーザーの共有を誤って消すリスクが大きい。
+        // 新規共有作成は UI 側で `isPremium` ゲートしているので、課金が切れた状態で
+        // 共有が増えることはない。
         if wasPremium && !nowPremium {
-            // 今回切れた → 解除フラグを立てて、その場で 1 回試す
-            UserDefaults.standard.set(true, forKey: Self.sharesRevocationPendingKey)
-            await handlePremiumExpired()
-        } else if !nowPremium {
-            // 非 Premium 状態で起動するたびに、自分が所有する CKShare の状態を実際に確認する。
-            // `wasPremium` フラグの取りこぼしや UserDefaults キャッシュのズレに依存しないよう、
-            // CKShare に他参加者または公開リンクが残っていたら必ず解除する。
-            await ensureNoActiveSharesIfFree()
-        }
-    }
-
-    /// 非 Premium のままになっている共有が CloudKit に残っていないかを実態ベースで確認し、
-    /// 残っていれば revoke する。失敗したらフラグを残し次回起動でリトライ。
-    private func ensureNoActiveSharesIfFree() async {
-        let pendingFlag = UserDefaults.standard.bool(forKey: Self.sharesRevocationPendingKey)
-        let hasActive = await ShareCoordinator.shared.hasActiveOwnedShares()
-        guard pendingFlag || hasActive else { return }
-
-        let success = await ShareCoordinator.shared.revokeAllOwnedShares()
-        if success {
-            UserDefaults.standard.removeObject(forKey: Self.sharesRevocationPendingKey)
-            // ユーザーに何が起きたかを通知 (起動時の自動解除ケース)
             NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
-        } else {
-            UserDefaults.standard.set(true, forKey: Self.sharesRevocationPendingKey)
         }
     }
 
@@ -190,14 +171,6 @@ final class PurchaseManager: ObservableObject {
                 await refreshEntitlements()
             }
         }
-    }
-
-    private func handlePremiumExpired() async {
-        let success = await ShareCoordinator.shared.revokeAllOwnedShares()
-        if success {
-            UserDefaults.standard.removeObject(forKey: Self.sharesRevocationPendingKey)
-        }
-        NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
     }
 }
 

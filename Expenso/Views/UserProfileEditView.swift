@@ -16,6 +16,9 @@ struct UserProfileEditView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var profile = UserProfileStore.shared
 
+    /// 編集対象シート。`nil` の場合はローカルキャッシュのみ更新 (= 初回シート作成前のテンプレ入力)
+    let sheet: ExpenseSheet?
+
     @State private var draftName: String = ""
     @State private var draftPhotoData: Data? = nil
     @State private var draftBgColorHex: String? = nil
@@ -24,6 +27,10 @@ struct UserProfileEditView: View {
     @State private var showMemojiEditor: Bool = false
     @State private var showPhotoPicker: Bool = false
     @State private var didLoad: Bool = false
+
+    init(sheet: ExpenseSheet? = nil) {
+        self.sheet = sheet
+    }
 
     var body: some View {
         NavigationStack {
@@ -126,9 +133,20 @@ struct UserProfileEditView: View {
     private func loadIfNeeded() {
         guard !didLoad else { return }
         didLoad = true
-        draftName       = profile.displayName
-        draftPhotoData  = profile.photoData
-        draftBgColorHex = profile.avatarBgColorHex
+        // シートが指定されていればそのシートの ParticipantProfile を優先 (per-sheet 値を編集)、
+        // 無ければローカルキャッシュ (= UserProfileStore = 直近の入力) から下書きする。
+        if let sheet,
+           let rn = profile.userRecordName, !rn.isEmpty,
+           let pp = (sheet.participantProfiles as? Set<ParticipantProfile>)?
+                .first(where: { $0.recordName == rn }) {
+            draftName       = pp.displayName ?? ""
+            draftPhotoData  = pp.photoData
+            draftBgColorHex = pp.colorHex
+        } else {
+            draftName       = profile.displayName
+            draftPhotoData  = profile.photoData
+            draftBgColorHex = profile.avatarBgColorHex
+        }
     }
 
     private func loadPhotoFromPicker() {
@@ -149,14 +167,14 @@ struct UserProfileEditView: View {
     }
 
     private func save() {
+        let oldName = profile.resolvedDisplayName
         profile.displayName      = draftName.trimmingCharacters(in: .whitespaces)
         profile.photoData        = draftPhotoData
         profile.avatarBgColorHex = draftBgColorHex
-        profile.applyToSelfMember(in: viewContext)
-        // CloudKit Sharing 経由で共有相手にも反映するため、各シートの ParticipantProfile も更新
+        // ローカル Member 更新 + (sheet があれば) そのシートの ParticipantProfile に書き込み + paidBy リネーム
         Task { @MainActor in
             await profile.ensureUserRecordNameLoaded()
-            profile.propagateProfile(in: viewContext)
+            profile.applyProfileEdit(in: viewContext, sheet: sheet, oldName: oldName)
         }
         Haptics.success()
         dismiss()

@@ -58,23 +58,35 @@ struct ExpensoApp: App {
                     await FXRatesService.shared.refreshIfStale()
                     await UserProfileStore.shared.ensureUserRecordNameLoaded()
                     let ctx = persistenceController.container.viewContext
-                    UserProfileStore.shared.syncFromSelfMember(in: ctx)
-                    UserProfileStore.shared.propagateProfile(in: ctx)
+                    // 別端末で先にプロフィールが設定されていれば、同期で来た ParticipantProfile から取り込む
+                    UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
                     // 定期項目の未生成 occurrence を Expense に展開
                     RecurringExpenseGenerator.generateAll(in: ctx)
                 }
-                // CloudKit が新しいデータを取り込んだら自分の Member も再 sync して
-                // ローカルのプロフィール (UserProfileStore) を最新に保つ
+                // CloudKit が新しいデータを取り込んだら ParticipantProfile から再 hydrate。
+                // 通知は viewContext へのマージ完了より早く飛ぶことがあるため、
+                // 200ms ほど待ってから fetch して取りこぼしを防ぐ。
                 .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
-                    let ctx = persistenceController.container.viewContext
-                    UserProfileStore.shared.syncFromSelfMember(in: ctx)
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        let ctx = persistenceController.container.viewContext
+                        if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
+                            await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                        }
+                        UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
+                    }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
-                        // 再前面化で entitlement 再確認 + 定期項目の生成チェック
                         Task { await PurchaseManager.shared.refreshEntitlements() }
                         let ctx = persistenceController.container.viewContext
                         RecurringExpenseGenerator.generateAll(in: ctx)
+                        Task { @MainActor in
+                            if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
+                                await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                            }
+                            UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
+                        }
                     }
                 }
         }

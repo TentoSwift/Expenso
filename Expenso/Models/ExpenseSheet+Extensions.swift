@@ -10,6 +10,10 @@ import SwiftUI
 extension ExpenseSheet {
     var displayName: String { name ?? "" }
     var displayColorHex: String { colorHex ?? "#5B8DEF" }
+    var displaySymbol: String {
+        let s = symbol ?? ""
+        return s.isEmpty ? "person.2.fill" : s
+    }
 
     /// シートのアクセントカラー (UI 全体の差し色として使う)
     var tint: SwiftUI.Color {
@@ -19,6 +23,25 @@ extension ExpenseSheet {
     var resolvedDefaultCurrencyCode: String {
         if let c = defaultCurrencyCode, !c.isEmpty { return c }
         return CurrencyCatalog.defaultCode
+    }
+
+    /// 月予算 (= 既定通貨換算で支出が超えないように管理する目標額)。
+    /// `0` または未設定なら「予算なし」(`nil` を返す)。
+    var resolvedMonthlyBudget: Decimal? {
+        guard let v = monthlyBudget as Decimal? else { return nil }
+        return v > 0 ? v : nil
+    }
+
+    /// 月予算が設定されていれば値を返し、無ければ `nil`。setter は 0 で空 (= 未設定) 扱い。
+    var monthlyBudgetDecimal: Decimal? {
+        get { resolvedMonthlyBudget }
+        set {
+            if let v = newValue, v > 0 {
+                monthlyBudget = NSDecimalNumber(decimal: v)
+            } else {
+                monthlyBudget = nil
+            }
+        }
     }
 
     /// このシートが Private ストアにあれば所有者、Shared ストアにあれば参加者。

@@ -2,9 +2,12 @@
 //  UserProfileStore.swift
 //  Expenso
 //
-//  ユーザーのアバター画像 (写真 or Memoji 合成) と表示名をローカルに保持。
-//  Public DB は使わず、共有相手への可視化は各 ExpenseSheet 配下の
-//  ParticipantProfile レコード経由で行う (CloudKit Sharing 経由で同期)。
+//  ユーザーのプロフィール (名前 / アバター画像 / 背景色) をローカルに保持するキャッシュ。
+//  - 同一アカウント別端末との同期は **ParticipantProfile** (各シート配下) を経由する。
+//    `propagateProfile` で全シートの PP に書き込み、CloudKit (Private DB / Shared)
+//    自動同期で他端末に届く。
+//  - 起動時 / 前面化時に `hydrateFromParticipantProfile` を呼び、新しい PP が来ていれば
+//    ローカルキャッシュを更新する。
 //
 
 import Foundation
@@ -18,10 +21,12 @@ final class UserProfileStore: ObservableObject {
     static let shared = UserProfileStore()
 
     private enum Keys {
-        static let displayName       = "userProfile.displayName"
-        static let avatarBgColorHex  = "userProfile.avatarBgColorHex"
-        static let selfMemberID      = "userProfile.selfMemberID"
-        static let userRecordName    = "userProfile.userRecordName"
+        static let displayName        = "userProfile.displayName"
+        static let avatarBgColorHex   = "userProfile.avatarBgColorHex"
+        static let selfMemberID       = "userProfile.selfMemberID"
+        static let userRecordName     = "userProfile.userRecordName"
+        /// ローカルプロフィールの最終更新時刻。ParticipantProfile.updatedAt との LWW 比較に使う。
+        static let profileUpdatedAt   = "userProfile.profileUpdatedAt"
     }
     private static let photoFileName = "userProfile.photo.jpg"
     private static let containerID = "iCloud.com.tento.Expenso"
@@ -33,7 +38,7 @@ final class UserProfileStore: ObservableObject {
         }
     }
 
-    /// Memoji エディタで選択した背景色 (Memoji 経路で使う)。
+    /// Memoji 等で選択した背景色 (アバター JPEG が無い時の塗りつぶし色としても使う)。
     @Published var avatarBgColorHex: String? {
         didSet { UserDefaults.standard.set(avatarBgColorHex, forKey: Keys.avatarBgColorHex) }
     }
@@ -43,6 +48,8 @@ final class UserProfileStore: ObservableObject {
         didSet { writePhotoToDisk() }
     }
 
+    /// MemberPicker で「自分」をハイライトする用のローカル Member.id キャッシュ。
+    /// cross-device 同期キーではなく、単に同端末でどの Member を「自分」として表示するかの目印。
     @Published private(set) var selfMemberID: UUID? {
         didSet {
             UserDefaults.standard.set(selfMemberID?.uuidString, forKey: Keys.selfMemberID)
@@ -54,10 +61,23 @@ final class UserProfileStore: ObservableObject {
         didSet { UserDefaults.standard.set(userRecordName, forKey: Keys.userRecordName) }
     }
 
+    /// ローカルプロフィールの最終更新時刻。
+    /// `propagateProfile` 成功時に更新し、`hydrateFromParticipantProfile` で PP の updatedAt と比較する。
+    @Published private(set) var profileUpdatedAt: Date? {
+        didSet { UserDefaults.standard.set(profileUpdatedAt, forKey: Keys.profileUpdatedAt) }
+    }
+
     var bgColor: Color { Color(hex: avatarBgColorHex ?? "#5B8DEF") ?? .blue }
 
     var resolvedDisplayName: String {
         displayName.isEmpty ? "自分" : displayName
+    }
+
+    /// プロフィールが未入力の状態か (= 初回シート作成時にプロフィール設定 UI を出す判定に使う)。
+    var isEmpty: Bool {
+        displayName.trimmingCharacters(in: .whitespaces).isEmpty
+            && photoData == nil
+            && (avatarBgColorHex ?? "").isEmpty
     }
 
     private init() {
@@ -72,6 +92,7 @@ final class UserProfileStore: ObservableObject {
             self.selfMemberID = nil
         }
         self.userRecordName = ud.string(forKey: Keys.userRecordName)
+        self.profileUpdatedAt = ud.object(forKey: Keys.profileUpdatedAt) as? Date
         self.photoData = Self.readPhotoFromDisk()
     }
 
@@ -106,191 +127,112 @@ final class UserProfileStore: ObservableObject {
         }
     }
 
-    // MARK: - Self Member sync (for paidBy resolution in Private sheets)
+    // MARK: - Self Member (local-only convenience for member picker)
 
-    /// 自分の Member を CK userRecordName で検索する。同一アカウントの全デバイスで一致。
-    /// recordName が無い場合は selfMemberID (UserDefaults) → name の順でフォールバック。
-    private func findOrCreateSelfMember(in ctx: NSManagedObjectContext) -> Member? {
-        // 1) recordName 一致 (cross-device 安定)
-        if let rn = userRecordName, !rn.isEmpty {
-            let req = NSFetchRequest<Member>(entityName: "Member")
-            req.predicate = NSPredicate(format: "recordName == %@", rn)
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first {
-                return m
-            }
-        }
-        // 2) selfMemberID 一致 (legacy / 同端末内で一意)
+    /// MemberPicker で「自分」を表示できるよう、ローカル Member を 1 つ確保する。
+    /// 表示用フィールド (name / colorHex / photoData) も最新の UserProfileStore 値で同期する。
+    /// recordName / updatedAt は触らない (cross-device 同期は ParticipantProfile に集約)。
+    func ensureSelfMemberExists(in ctx: NSManagedObjectContext) {
+        let req = NSFetchRequest<Member>(entityName: "Member")
+        req.fetchLimit = 1
         if let id = selfMemberID {
-            let req = NSFetchRequest<Member>(entityName: "Member")
             req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first {
-                return m
-            }
         }
-        // 3) name 一致 (旧スキーマからの移行)
-        if !displayName.isEmpty {
-            let req = NSFetchRequest<Member>(entityName: "Member")
-            req.predicate = NSPredicate(format: "name == %@", resolvedDisplayName)
-            req.sortDescriptors = [NSSortDescriptor(keyPath: \Member.createdAt, ascending: true)]
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first {
-                return m
-            }
-        }
-        return nil
-    }
+        let existing: Member? = (selfMemberID != nil) ? (try? ctx.fetch(req))?.first : nil
 
-    /// Settings 編集後に呼ぶ。自分の Member を更新 (無ければ作成)し、
-    /// 自分が払った Private ストアの過去支出の paidBy も追従更新する。
-    /// 識別子: Member.recordName (= userRecordName) を主、id (UUID) を副。
-    func applyToSelfMember(in ctx: NSManagedObjectContext) {
         let member: Member
-        let oldName: String?
-
-        if let existing = findOrCreateSelfMember(in: ctx) {
+        if let existing {
             member = existing
-            oldName = existing.name
         } else {
             member = Member(context: ctx)
-            member.id = UUID()
+            let id = UUID()
+            member.id = id
             member.createdAt = .now
             member.sortOrder = 0
-            oldName = nil
-        }
-
-        // recordName を必ず埋める (cross-device 識別キー)
-        if let rn = userRecordName, !rn.isEmpty {
-            member.recordName = rn
-        }
-        // selfMemberID キャッシュも合わせる
-        if let mid = member.id {
-            selfMemberID = mid
+            selfMemberID = id
         }
 
         let newName = resolvedDisplayName
-        member.name      = newName
-        member.colorHex  = avatarBgColorHex ?? "#5B8DEF"
-        member.photoData = photoData
-        // LWW タイムスタンプ: 編集の時刻を記録。propagateProfile での衝突解決に使う
-        member.updatedAt = .now
+        if member.name != newName { member.name = newName }
+        let newColor = avatarBgColorHex ?? "#5B8DEF"
+        if member.colorHex != newColor { member.colorHex = newColor }
+        if member.photoData != photoData { member.photoData = photoData }
 
-        if let old = oldName, !old.isEmpty, old != newName {
-            renamePaidByInPrivateStore(from: old, to: newName, in: ctx)
-        }
-
-        try? ctx.save()
+        if ctx.hasChanges { try? ctx.save() }
     }
 
-    /// CloudKit 同期で来た自分の Member の値をローカルに取り込む。
-    /// 同一アカウント別デバイス間でプロフィールを一致させるため、**常に Member を正** とし
-    /// `UserProfileStore` のキャッシュを Member の値で上書きする。編集は必ず
-    /// `applyToSelfMember` を通って Member に書き、その後 sync で他デバイスへ伝搬する設計。
-    func syncFromSelfMember(in ctx: NSManagedObjectContext) {
-        guard let member = findOrCreateSelfMember(in: ctx) else { return }
+    // MARK: - Hydrate from ParticipantProfile (cross-device)
 
-        if let mid = member.id, mid != selfMemberID {
-            selfMemberID = mid
-        }
-        if let n = member.name, !n.isEmpty, displayName != n {
+    /// 別端末から同期されてきた ParticipantProfile (recordName == userRecordName) から
+    /// ローカル UserProfileStore を更新する。
+    /// - ローカルがまだ空 (= 初回起動 + 既に他端末でシート作成済み) なら無条件で取り込む。
+    /// - 既にローカル値があるなら、PP.updatedAt > profileUpdatedAt の時だけ取り込む (LWW)。
+    @discardableResult
+    func hydrateFromParticipantProfile(in ctx: NSManagedObjectContext) -> Bool {
+        guard let rn = userRecordName, !rn.isEmpty else { return false }
+        let req = NSFetchRequest<ParticipantProfile>(entityName: "ParticipantProfile")
+        req.predicate = NSPredicate(format: "recordName == %@", rn)
+        req.sortDescriptors = [NSSortDescriptor(keyPath: \ParticipantProfile.updatedAt, ascending: false)]
+        req.fetchLimit = 1
+        guard let latest = (try? ctx.fetch(req))?.first else { return false }
+
+        let ppAt = latest.updatedAt ?? .distantPast
+        let localAt = profileUpdatedAt ?? .distantPast
+
+        let shouldAdopt = isEmpty || ppAt > localAt
+        guard shouldAdopt else { return false }
+
+        if let n = latest.displayName, !n.isEmpty, displayName != n {
             displayName = n
         }
-        if let c = member.colorHex, !c.isEmpty, avatarBgColorHex != c {
+        if let c = latest.colorHex, !c.isEmpty, avatarBgColorHex != c {
             avatarBgColorHex = c
         }
-        if photoData != member.photoData {
-            photoData = member.photoData
+        if photoData != latest.photoData {
+            photoData = latest.photoData
         }
-        // recordName が未設定なら今のうちに埋める (旧 Member の救済)
-        if (member.recordName ?? "").isEmpty,
-           let rn = userRecordName, !rn.isEmpty {
-            member.recordName = rn
-            try? ctx.save()
-        }
+        // ローカル更新時刻も PP の値に揃える (= 自分が編集していないので、PP に合わせる)
+        profileUpdatedAt = ppAt > .distantPast ? ppAt : .now
+        // selfMember の表示用フィールドも合わせて refresh
+        ensureSelfMemberExists(in: ctx)
+        return true
     }
 
-    private func renamePaidByInPrivateStore(from old: String, to new: String, in ctx: NSManagedObjectContext) {
-        let pc = PersistenceController.shared
-        guard let privateStore = pc.privateStore else { return }
+    // MARK: - Per-sheet ParticipantProfile
 
-        let req = NSFetchRequest<Expense>(entityName: "Expense")
-        req.predicate = NSPredicate(format: "paidBy == %@", old)
-        guard let expenses = try? ctx.fetch(req), !expenses.isEmpty else { return }
-
-        for e in expenses {
-            guard let store = e.objectID.persistentStore, store == privateStore else { continue }
-            e.paidBy = new
-        }
-    }
-
-    func ensureSelfMemberExists(in ctx: NSManagedObjectContext) {
-        if selfMemberID != nil { return }
-        applyToSelfMember(in: ctx)
-    }
-
-    // MARK: - ParticipantProfile propagation (cross-account visibility)
-
-    /// 自分のプロフィールを、参加している全シート (Private + Shared) の `participantProfiles` に
-    /// ParticipantProfile レコードとして書き込む。CKShare 経由で他の参加者にも同期される。
-    /// - Parameter context: 操作するコンテキスト (通常 viewContext)
-    /// 自分のプロフィールを各シートの ParticipantProfile に書き込む。
-    /// **Member を source of truth として使い**, ParticipantProfile.updatedAt と
-    /// Member.updatedAt を比較する LWW 戦略で「新しい方が勝つ」ようにする。
-    /// 古い端末がオフラインから復帰した時に、その古いデータが新しい PP を上書きしないことが目的。
-    func propagateProfile(in ctx: NSManagedObjectContext) {
-        guard let recordName = userRecordName, !recordName.isEmpty else { return }
-        guard let member = findOrCreateSelfMember(in: ctx) else { return }
-        let memberUpdatedAt = member.updatedAt ?? .distantPast
-
-        let sheetReq = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
-        guard let sheets = try? ctx.fetch(sheetReq) else { return }
-
-        for sheet in sheets {
-            guard let sheetStore = sheet.objectID.persistentStore else { continue }
-
-            let existing: ParticipantProfile? = (sheet.participantProfiles as? Set<ParticipantProfile>)?
-                .first(where: { $0.recordName == recordName })
-
-            // 既存 PP が Member より新しければ、こちらは古い情報なのでスキップ。
-            // (= オフライン端末の古い Member が、別端末の最新 PP を踏みつぶさない)
-            if let pp = existing, let ppAt = pp.updatedAt, ppAt > memberUpdatedAt {
-                continue
-            }
-
-            let profile: ParticipantProfile
-            if let existing {
-                profile = existing
-            } else {
-                profile = ParticipantProfile(context: ctx)
-                ctx.assign(profile, to: sheetStore)
-                profile.recordName = recordName
-                profile.sheet = sheet
-            }
-            profile.displayName = member.name
-            profile.colorHex    = member.colorHex
-            profile.photoData   = member.photoData
-            profile.updatedAt   = memberUpdatedAt > .distantPast ? memberUpdatedAt : .now
-        }
-
-        try? ctx.save()
-    }
-
-    /// 1 シートだけプロフィールを書き込む (支出追加時など、特定シートだけ更新する用途)。
-    /// LWW チェックを行い、自分の Member が PP よりも古ければ何もしない。
+    /// 1 シートに自分の ParticipantProfile を生成 / 更新する。
+    /// - シート作成直後 (`AddSheetView.save`) で `UserProfileStore` の現在値をシートにコピーする
+    /// - 共有受諾後の自動セットアップで自分の PP をシートに用意する
+    /// - 個別シートのプロフィール編集後に書き戻す
     func ensureProfile(in sheet: ExpenseSheet, ctx: NSManagedObjectContext) {
         guard let recordName = userRecordName, !recordName.isEmpty else { return }
-        guard let sheetStore = sheet.objectID.persistentStore else { return }
-        guard let member = findOrCreateSelfMember(in: ctx) else { return }
-        let memberUpdatedAt = member.updatedAt ?? .distantPast
+        writeParticipantProfile(into: sheet, recordName: recordName, ctx: ctx, now: Date())
+        if ctx.hasChanges { try? ctx.save() }
+    }
 
-        let existing = (sheet.participantProfiles as? Set<ParticipantProfile>)?
-            .first(where: { $0.recordName == recordName })
-
-        if let pp = existing, let ppAt = pp.updatedAt, ppAt > memberUpdatedAt {
-            return
+    /// 自分の PP がまだ存在しないシートにだけ PP を作る (既存シートの値は上書きしない)。
+    /// 共有受諾後・別端末から同期されてきた新シートの初期化に使う。
+    func ensureProfileForAllSheets(in ctx: NSManagedObjectContext) {
+        guard let recordName = userRecordName, !recordName.isEmpty else { return }
+        let sheetReq = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        guard let sheets = try? ctx.fetch(sheetReq) else { return }
+        let now = Date()
+        var didChange = false
+        for sheet in sheets {
+            let existing = (sheet.participantProfiles as? Set<ParticipantProfile>)?
+                .first(where: { $0.recordName == recordName })
+            if existing == nil {
+                writeParticipantProfile(into: sheet, recordName: recordName, ctx: ctx, now: now)
+                didChange = true
+            }
         }
+        if didChange, ctx.hasChanges { try? ctx.save() }
+    }
 
+    private func writeParticipantProfile(into sheet: ExpenseSheet, recordName: String, ctx: NSManagedObjectContext, now: Date) {
+        guard let sheetStore = sheet.objectID.persistentStore else { return }
+        let existing: ParticipantProfile? = (sheet.participantProfiles as? Set<ParticipantProfile>)?
+            .first(where: { $0.recordName == recordName })
         let profile: ParticipantProfile
         if let existing {
             profile = existing
@@ -300,9 +242,35 @@ final class UserProfileStore: ObservableObject {
             profile.recordName = recordName
             profile.sheet = sheet
         }
-        profile.displayName = member.name
-        profile.colorHex    = member.colorHex
-        profile.photoData   = member.photoData
-        profile.updatedAt   = memberUpdatedAt > .distantPast ? memberUpdatedAt : .now
+        profile.displayName = resolvedDisplayName
+        profile.colorHex    = avatarBgColorHex ?? "#5B8DEF"
+        profile.photoData   = photoData
+        profile.updatedAt   = now
+    }
+
+    // MARK: - Apply edits (per-sheet)
+
+    /// プロフィール編集の保存処理 (シート単位)。
+    /// - Parameter sheet: 編集対象のシート。`nil` ならローカルキャッシュ (UserDefaults + Member) のみ更新
+    ///   (= 初回シート作成前にプロフィールを下書きするケース。シートはまだ無い)
+    /// - Parameter oldName: 編集前の表示名。差分があればそのシートの paidBy を新名にリネームする
+    func applyProfileEdit(in ctx: NSManagedObjectContext, sheet: ExpenseSheet?, oldName: String? = nil) {
+        ensureSelfMemberExists(in: ctx)
+        if let sheet {
+            ensureProfile(in: sheet, ctx: ctx)
+            if let old = oldName, !old.isEmpty, old != resolvedDisplayName {
+                renamePaidBy(in: sheet, from: old, to: resolvedDisplayName, ctx: ctx)
+            }
+        }
+        profileUpdatedAt = .now
+    }
+
+    /// 1 シート内の旧 paidBy 文字列を新名に置き換える。
+    private func renamePaidBy(in sheet: ExpenseSheet, from old: String, to new: String, ctx: NSManagedObjectContext) {
+        let req = NSFetchRequest<Expense>(entityName: "Expense")
+        req.predicate = NSPredicate(format: "sheet == %@ AND paidBy == %@", sheet, old)
+        guard let expenses = try? ctx.fetch(req), !expenses.isEmpty else { return }
+        for e in expenses { e.paidBy = new }
+        if ctx.hasChanges { try? ctx.save() }
     }
 }

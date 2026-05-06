@@ -129,8 +129,7 @@ struct EditRecurringRuleView: View {
                                 Text("カテゴリ")
                                 Spacer()
                                 if let cat = selectedCategory {
-                                    Image(systemName: cat.displaySymbol)
-                                        .foregroundStyle(cat.tint)
+                                    CategoryIconView(category: cat, size: 24)
                                     Text(cat.displayName)
                                         .foregroundStyle(.secondary)
                                 } else {

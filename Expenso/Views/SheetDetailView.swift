@@ -46,30 +46,30 @@ struct SheetDetailView: View {
     @State private var selectedCategory: ExpenseCategory?
     @AppStorage("expenseSortOption") private var sortOptionRaw: String = SortOption.dateDesc.rawValue
 
+    /// シート配下の Expense を直接観測。`record.expenses` 経由だと子の attribute 変更
+    /// (date / amount 等) で SwiftUI 再描画が走らず、編集後に古い日付グループに残り続けてしまう。
+    @FetchRequest private var allExpenses: FetchedResults<Expense>
+
+    init(record: ExpenseSheet) {
+        self.record = record
+        self._allExpenses = FetchRequest<Expense>(
+            sortDescriptors: [NSSortDescriptor(keyPath: \Expense.date, ascending: false)],
+            predicate: NSPredicate(format: "sheet == %@", record),
+            animation: .default
+        )
+    }
+
     private var sortOption: SortOption {
         SortOption(rawValue: sortOptionRaw) ?? .dateDesc
     }
 
     // MARK: - Filtering
 
-    private var periodExpenses: [Expense] {
-        let cal = Calendar.current
-        let now = Date()
-        return record.sortedExpenses.filter { e in
-            guard let d = e.date else { return false }
-            switch period {
-            case .thisMonth: return cal.isDate(d, equalTo: now, toGranularity: .month)
-            case .lastMonth:
-                guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return false }
-                return cal.isDate(d, equalTo: lm, toGranularity: .month)
-            case .thisYear:  return cal.isDate(d, equalTo: now, toGranularity: .year)
-            case .all:       return true
-            }
-        }
-    }
-
+    /// 一覧に表示する支出/収入。期間フィルタは適用しない (= 期間ピッカーは
+    /// SummaryCard の合計金額にのみ影響し、行の表示は全期間で固定)。
+    /// カテゴリピル・検索・並び順はここで適用する。
     private var filteredExpenses: [Expense] {
-        var list = periodExpenses
+        var list = Array(allExpenses)
         if let cat = selectedCategory {
             list = list.filter { $0.category?.objectID == cat.objectID }
         }
@@ -94,16 +94,16 @@ struct SheetDetailView: View {
         ZStack(alignment: .bottom) {
             ScrollView {
                 VStack(spacing: 16) {
-                    SummaryCard(record: record, period: $period)
+                    SummaryCard(record: record, period: $period, selectedCategory: selectedCategory)
                         .padding(.horizontal)
                         .padding(.top, 8)
 
-                    if !record.sortedExpenses.isEmpty {
+                    if !allExpenses.isEmpty {
                         categoryPills
                             .padding(.horizontal)
                     }
 
-                    if record.sortedExpenses.isEmpty {
+                    if allExpenses.isEmpty {
                         emptyStateInitial
                             .padding(.top, 40)
                     } else if filteredExpenses.isEmpty {
@@ -190,7 +190,7 @@ struct SheetDetailView: View {
             case "share": showingShare = true
             case "editGroup": showingEditGroup = true
             case "editExpense":
-                if let first = record.sortedExpenses.first { editingExpense = first }
+                if let first = allExpenses.first { editingExpense = first }
             default: break
             }
         }
@@ -378,7 +378,7 @@ struct SheetDetailView: View {
     private var usedCategories: [ExpenseCategory] {
         var seen: Set<NSManagedObjectID> = []
         var result: [ExpenseCategory] = []
-        for exp in record.sortedExpenses {
+        for exp in allExpenses {
             if let cat = exp.category, !seen.contains(cat.objectID) {
                 seen.insert(cat.objectID)
                 result.append(cat)
@@ -426,30 +426,60 @@ struct SheetDetailView: View {
 private struct SummaryCard: View {
     @ObservedObject var record: ExpenseSheet
     @Binding var period: SheetDetailView.Period
+    let selectedCategory: ExpenseCategory?
     @ObservedObject private var fx = FXRatesService.shared
+
+    /// 子 Expense の編集 (amount 変更等) は ExpenseSheet の objectWillChange を発火させないため、
+    /// `record.expenses` 経由で集計すると view が再描画されない。
+    /// @FetchRequest を直接観測することで、expense 単位の変更でも合計表示が即時更新される。
+    @FetchRequest private var expenses: FetchedResults<Expense>
+
+    init(record: ExpenseSheet, period: Binding<SheetDetailView.Period>, selectedCategory: ExpenseCategory? = nil) {
+        self.record = record
+        self._period = period
+        self.selectedCategory = selectedCategory
+        self._expenses = FetchRequest<Expense>(
+            sortDescriptors: [NSSortDescriptor(keyPath: \Expense.date, ascending: false)],
+            predicate: NSPredicate(format: "sheet == %@", record),
+            animation: .default
+        )
+    }
 
     private var code: String { record.resolvedDefaultCurrencyCode }
 
     private func totals() -> (expense: Decimal, income: Decimal, missing: Set<String>) {
         let cal = Calendar.current
         let now = Date()
+        let periodFilter: (Expense) -> Bool
         switch period {
         case .thisMonth:
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: now, toGranularity: .month)
-            }
+            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .month) }
         case .lastMonth:
             guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return (.zero, .zero, []) }
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: lm, toGranularity: .month)
-            }
+            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: lm, toGranularity: .month) }
         case .thisYear:
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: now, toGranularity: .year)
-            }
+            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .year) }
         case .all:
-            return record.convertedTotals()
+            periodFilter = { _ in true }
         }
+        let categoryID = selectedCategory?.objectID
+        let target = code
+        var expenseSum: Decimal = 0
+        var incomeSum: Decimal = 0
+        var missing: Set<String> = []
+        for e in expenses where periodFilter(e) {
+            if let categoryID, e.category?.objectID != categoryID { continue }
+            let from = e.resolvedCurrencyCode
+            guard let converted = fx.convert(e.amountDecimal, from: from, to: target) else {
+                missing.insert(from)
+                continue
+            }
+            switch e.kind {
+            case .expense: expenseSum += converted
+            case .income:  incomeSum += converted
+            }
+        }
+        return (expenseSum, incomeSum, missing)
     }
 
     var body: some View {
@@ -481,6 +511,18 @@ private struct SummaryCard: View {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(record.tint.opacity(0.18)))
                 }
+                if let cat = selectedCategory {
+                    HStack(spacing: 4) {
+                        Image(systemName: cat.displaySymbol)
+                            .font(.caption2)
+                        Text(cat.displayName)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(cat.tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(cat.tint.opacity(0.18)))
+                }
                 Spacer()
                 ShareStatusBadge(record: record)
             }
@@ -510,6 +552,12 @@ private struct SummaryCard: View {
                 .font(.subheadline)
             }
 
+            // 月予算の進捗バー (今月 + カテゴリ未選択時のみ)
+            if period == .thisMonth, selectedCategory == nil,
+               let budget = record.monthlyBudgetDecimal {
+                budgetProgress(spent: t.expense, budget: budget)
+            }
+
             if !t.missing.isEmpty {
                 Label("\(t.missing.sorted().joined(separator: ", ")) のレート未取得", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
@@ -529,8 +577,58 @@ private struct SummaryCard: View {
     }
 
     private var hasMultipleCurrencies: Bool {
-        let codes = Set(((record.expenses as? Set<Expense>) ?? []).map { $0.resolvedCurrencyCode })
-        return codes.count > 1
+        Set(expenses.map { $0.resolvedCurrencyCode }).count > 1
+    }
+
+    /// 月予算の進捗バー。
+    /// - 80% 未満: アクセントカラー
+    /// - 80% 以上 100% 未満: オレンジ
+    /// - 100% 以上 (= 超過): 赤、超過分の表示も追加
+    @ViewBuilder
+    private func budgetProgress(spent: Decimal, budget: Decimal) -> some View {
+        let ratio = NSDecimalNumber(decimal: spent / budget).doubleValue
+        let clamped = max(0, min(1, ratio))
+        let isOver = spent > budget
+        let color: Color = isOver ? .red : (ratio >= 0.8 ? .orange : record.tint)
+        let remaining = budget - spent
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("月予算", systemImage: "target")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isOver {
+                    Text("超過 \(CurrencyCatalog.format(-remaining, code: code))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.red)
+                } else {
+                    Text("残り \(CurrencyCatalog.format(remaining, code: code))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(color)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.tertiarySystemBackground))
+                    Capsule()
+                        .fill(color.gradient)
+                        .frame(width: geo.size.width * clamped)
+                }
+            }
+            .frame(height: 8)
+            HStack {
+                Text("\(CurrencyCatalog.format(spent, code: code)) / \(CurrencyCatalog.format(budget, code: code))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((ratio * 100).rounded()))%")
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 
@@ -572,16 +670,33 @@ private struct DateHeaderView: View {
 private struct ExpenseRowView: View {
     @ObservedObject var expense: Expense
 
+    /// 支払/受取の人がいればカテゴリアイコンの右下にアバターを重ねる。
+    /// (居なければカテゴリアイコンのみ)
+    @ViewBuilder
+    private var categoryIconWithPayer: some View {
+        let payerName = expense.displayPaidBy
+        ZStack(alignment: .bottomTrailing) {
+            CategoryIconView(expense: expense, size: 36)
+            if !payerName.isEmpty {
+                PayerAvatar(
+                    member: expense.resolvedPayer,
+                    participantProfile: expense.resolvedParticipantProfile,
+                    fallbackName: payerName,
+                    fallbackColorHex: "#8E8E93",
+                    fallbackPhoto: nil,
+                    size: 18
+                )
+                .overlay(
+                    Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                )
+                .offset(x: 4, y: 4)
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(expense.categoryTint.gradient)
-                Image(systemName: expense.categorySymbol)
-                    .foregroundStyle(.white)
-                    .font(.callout.weight(.semibold))
-            }
-            .frame(width: 36, height: 36)
+            categoryIconWithPayer
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(expense.displayTitle.isEmpty ? expense.categoryDisplayName : expense.displayTitle)
@@ -591,14 +706,8 @@ private struct ExpenseRowView: View {
                     HStack(spacing: 6) {
                         let displayName = expense.displayPaidBy
                         if !displayName.isEmpty {
-                            PayerAvatar(
-                                member: expense.resolvedPayer,
-                                participantProfile: expense.resolvedParticipantProfile,
-                                fallbackName: displayName,
-                                fallbackColorHex: "#8E8E93",
-                                fallbackPhoto: nil,
-                                size: 16
-                            )
+                            // アバターはカテゴリアイコンに重ねて表示しているので、
+                            // 字幕には名前のみ出す
                             Text(displayName)
                                 .foregroundStyle(expense.payerTint)
                         }

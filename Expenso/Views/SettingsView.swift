@@ -7,13 +7,11 @@ import SwiftUI
 import SwiftData
 
 struct SettingsView: View {
-    @StateObject private var profile = UserProfileStore.shared
     @StateObject private var pm = PurchaseManager.shared
     @StateObject private var fx = FXRatesService.shared
     @Environment(\.managedObjectContext) private var viewContext
     @State private var showPaywall: Bool = false
     @State private var showEraseConfirm: Bool = false
-    @State private var showProfileEditor: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -53,38 +51,6 @@ struct SettingsView: View {
                             }
                         }
                     }
-                }
-
-                Section {
-                    Button {
-                        showProfileEditor = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            AvatarView(
-                                photoData: profile.photoData,
-                                displayName: profile.resolvedDisplayName,
-                                colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
-                                size: 56
-                            )
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile.resolvedDisplayName)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text("プロフィールを編集")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                } header: {
-                    Text("プロフィール")
-                } footer: {
-                    Text("アカウント全体で使われるアバターと名前です。共有シートの相手にも表示されます。")
                 }
 
                 Section("カテゴリ") {
@@ -200,11 +166,8 @@ struct SettingsView: View {
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
             }
-            .sheet(isPresented: $showProfileEditor) {
-                UserProfileEditView()
-            }
             .task {
-                profile.ensureSelfMemberExists(in: viewContext)
+                UserProfileStore.shared.ensureSelfMemberExists(in: viewContext)
             }
             .onAppear {
                 if ProcessInfo.processInfo.environment["EXPENSO_DEMO"] == "paywall" {

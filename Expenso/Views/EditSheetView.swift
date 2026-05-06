@@ -12,18 +12,37 @@ struct EditSheetView: View {
 
     @ObservedObject var record: ExpenseSheet
 
+    @StateObject private var profile = UserProfileStore.shared
+
     @State private var name: String = ""
     @State private var note: String = ""
     @State private var selectedColor: String = "#5B8DEF"
+    @State private var selectedSymbol: String = "person.2.fill"
     @State private var defaultCurrencyCode: String = "JPY"
+    @State private var budgetText: String = ""
     @State private var didLoad: Bool = false
     @State private var showDeleteConfirm: Bool = false
+    @State private var showProfileEditor: Bool = false
+
+    /// このシート配下の自分の ParticipantProfile (= 「このシートでの自分」)
+    private var selfParticipantProfile: ParticipantProfile? {
+        guard let rn = profile.userRecordName, !rn.isEmpty,
+              let profiles = record.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        return profiles.first(where: { $0.recordName == rn })
+    }
 
     // CRDT 用スナップショット (差分のみ書き戻し)
     @State private var origName: String = ""
     @State private var origNote: String = ""
     @State private var origColor: String = ""
+    @State private var origSymbol: String = ""
     @State private var origCurrencyCode: String = ""
+    @State private var origBudgetText: String = ""
+
+    /// JPY/KRW など最小単位のない通貨は decimalPad 不要
+    private var decimalKeypadNeeded: Bool {
+        !["JPY", "KRW", "VND", "IDR"].contains(defaultCurrencyCode)
+    }
 
     private let palette: [String] = [
         "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
@@ -33,6 +52,19 @@ struct EditSheetView: View {
     var body: some View {
         NavigationStack {
             Form {
+                profileSection
+
+                Section {
+                    HStack {
+                        Spacer()
+                        SheetIconView.baseIcon(symbol: selectedSymbol,
+                                               tint: Color(hex: selectedColor) ?? .blue,
+                                               size: 72)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                }
+
                 Section("シート名") {
                     TextField("家族の家計、旅行など", text: $name)
                 }
@@ -56,12 +88,37 @@ struct EditSheetView: View {
                     .padding(.vertical, 4)
                 }
 
+                Section("アイコン") {
+                    sheetIconGrid
+                }
+
                 Section {
                     currencyPicker
                 } header: {
                     Text("既定通貨")
                 } footer: {
                     Text("変更後に追加した支出に適用されます。既存の支出の通貨は変わりません。")
+                }
+
+                Section {
+                    HStack(spacing: 6) {
+                        Text(CurrencyCatalog.option(for: defaultCurrencyCode).symbol)
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 24, alignment: .leading)
+                        TextField("0 (未設定)", text: $budgetText)
+                            .keyboardType(decimalKeypadNeeded ? .decimalPad : .numberPad)
+                            .monospacedDigit()
+                            .onChange(of: budgetText) { _, new in
+                                let allowed = decimalKeypadNeeded
+                                    ? new.filter { $0.isNumber || $0 == "." }
+                                    : new.filter { $0.isNumber }
+                                if allowed != new { budgetText = allowed }
+                            }
+                    }
+                } header: {
+                    Text("月予算 (任意)")
+                } footer: {
+                    Text("「今月」表示時に進捗バーで残額を可視化します。0 のまま保存すると予算なし扱い。")
                 }
 
                 Section("メモ (任意)") {
@@ -92,6 +149,9 @@ struct EditSheetView: View {
                 }
             }
             .onAppear { loadIfNeeded() }
+            .sheet(isPresented: $showProfileEditor) {
+                UserProfileEditView(sheet: record)
+            }
             .confirmationDialog(
                 record.isOwnedByCurrentUser
                     ? "「\(record.displayName)」を削除しますか?"
@@ -109,6 +169,77 @@ struct EditSheetView: View {
                      : "あなたの端末からこのシートが消えます。オーナーや他の参加者のデータは残ります。")
             }
         }
+    }
+
+    @ViewBuilder
+    private var profileSection: some View {
+        Section {
+            Button {
+                showProfileEditor = true
+            } label: {
+                HStack(spacing: 12) {
+                    if let pp = selfParticipantProfile {
+                        ObservedParticipantProfileAvatar(profile: pp, size: 44)
+                    } else {
+                        AvatarView(
+                            photoData: profile.photoData,
+                            displayName: profile.resolvedDisplayName,
+                            colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
+                            size: 44
+                        )
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(selfParticipantProfile?.displayName?.isEmpty == false
+                             ? selfParticipantProfile!.displayName!
+                             : profile.resolvedDisplayName)
+                            .foregroundStyle(.primary)
+                            .fontWeight(.medium)
+                        Text("プロフィールを編集")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+        } header: {
+            Text("このシートでの自分")
+        } footer: {
+            Text("このシート内の表示専用です。シートごとに別々の名前 / アバターを設定できます。")
+                .font(.caption2)
+        }
+    }
+
+    private var sheetIconGrid: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 6)
+        let tint = Color(hex: selectedColor) ?? .blue
+        return LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(SheetSymbols.options, id: \.self) { sym in
+                Button {
+                    selectedSymbol = sym
+                } label: {
+                    ZStack {
+                        if selectedSymbol == sym {
+                            Circle()
+                                .stroke(Color.primary.opacity(0.35), lineWidth: 3)
+                                .frame(width: 46, height: 46)
+                        }
+                        Circle()
+                            .fill(selectedSymbol == sym ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                            .frame(width: 38, height: 38)
+                        Image(systemName: sym)
+                            .foregroundStyle(selectedSymbol == sym ? .white : Color.primary)
+                            .font(.callout.weight(.medium))
+                    }
+                    .frame(height: 46)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private var currencyPicker: some View {
@@ -140,12 +271,20 @@ struct EditSheetView: View {
         name = record.displayName
         note = record.note ?? ""
         selectedColor = record.displayColorHex
+        selectedSymbol = record.displaySymbol
         defaultCurrencyCode = record.resolvedDefaultCurrencyCode
+        if let budget = record.monthlyBudgetDecimal {
+            budgetText = NSDecimalNumber(decimal: budget).stringValue
+        } else {
+            budgetText = ""
+        }
 
         origName = name
         origNote = note
         origColor = selectedColor
+        origSymbol = selectedSymbol
         origCurrencyCode = defaultCurrencyCode
+        origBudgetText = budgetText
     }
 
     /// オーナー = ローカル削除 + CloudKit 伝搬で全員から消える。
@@ -178,7 +317,9 @@ struct EditSheetView: View {
         if trimmed != origName { record.name = trimmed }
         if note != origNote { record.note = note }
         if selectedColor != origColor { record.colorHex = selectedColor }
+        if selectedSymbol != origSymbol { record.symbol = selectedSymbol }
         if defaultCurrencyCode != origCurrencyCode { record.defaultCurrencyCode = defaultCurrencyCode }
+        if budgetText != origBudgetText { record.monthlyBudgetDecimal = Decimal(string: budgetText) }
         PersistenceController.shared.save()
         Haptics.success()
         dismiss()

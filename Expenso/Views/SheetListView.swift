@@ -106,95 +106,14 @@ struct SheetListView: View {
 
 private struct SheetRowView: View {
     @ObservedObject var record: ExpenseSheet
-    @ObservedObject private var fx = FXRatesService.shared
-
-    private var color: Color { Color(hex: record.displayColorHex) ?? .blue }
-    private var expenseCount: Int { (record.expenses as? Set<Expense>)?.count ?? 0 }
-
-    /// 全通貨を既定通貨に換算した今月の支出/収入合計
-    private var monthlyTotals: (expense: Decimal, income: Decimal) {
-        let totals = record.convertedMonthlyTotals()
-        return (totals.expense, totals.income)
-    }
-
-    /// 全通貨を既定通貨に換算した今日の支出合計
-    private var todayExpense: Decimal {
-        let cal = Calendar.current
-        return record.convertedTotals { e in
-            cal.isDate(e.date ?? .distantPast, inSameDayAs: .now)
-        }.expense
-    }
-
-    /// 全期間・全通貨換算の差額 (収入 - 支出)
-    private var totalDiff: Decimal {
-        let totals = record.convertedTotals()
-        return totals.income - totals.expense
-    }
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(color.gradient)
-                Image(systemName: "person.2.fill")
-                    .foregroundStyle(.white)
-                    .font(.callout)
-            }
-            .frame(width: 44, height: 44)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(record.displayName)
-                        .font(.headline)
-                    ShareStatusBadge(record: record)
-                }
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                    Text(CurrencyCatalog.format(monthlyTotals.expense, code: code))
-                        .foregroundStyle(.red)
-                        .fontWeight(.semibold)
-                    if monthlyTotals.income > 0 {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                        Text(CurrencyCatalog.format(monthlyTotals.income, code: code))
-                            .foregroundStyle(.green)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .font(.caption)
-                .monospacedDigit()
-                if todayExpense > 0 {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sun.max.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                        Text("今日 \(CurrencyCatalog.format(todayExpense, code: code))")
-                            .foregroundStyle(.secondary)
-                        if expenseCount > 0 {
-                            Text("· \(expenseCount) 件").foregroundStyle(.tertiary)
-                        }
-                    }
-                    .font(.caption2)
-                    .monospacedDigit()
-                }
-            }
-
+            SheetIconView(record: record, size: 44)
+            Text(record.displayName)
+                .font(.headline)
             Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("差額")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(CurrencyCatalog.format(totalDiff, code: code))
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(totalDiff >= 0 ? .green : .red)
-            }
         }
         .padding(.vertical, 4)
     }
-
-    private var code: String { record.resolvedDefaultCurrencyCode }
 }

@@ -49,13 +49,7 @@ struct CategoryPickerView: View {
                     dismiss()
                 } label: {
                     HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(cat.tint.opacity(0.18))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: cat.displaySymbol)
-                                .foregroundStyle(cat.tint)
-                        }
+                        CategoryIconView(category: cat, size: 36)
                         Text(cat.displayName)
                             .foregroundStyle(.primary)
                         Spacer()

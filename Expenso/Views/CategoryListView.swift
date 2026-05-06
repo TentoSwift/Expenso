@@ -14,6 +14,8 @@ struct CategoryListView: View {
 
     @State private var editingCategory: ExpenseCategory?
     @State private var showingNew = false
+    /// 削除ダイアログの対象。`nil` ならダイアログは閉じている。
+    @State private var deletingCategory: ExpenseCategory?
 
     init(record: ExpenseSheet) {
         self.record = record
@@ -59,6 +61,37 @@ struct CategoryListView: View {
         .sheet(isPresented: $showingNew) {
             EditCategoryView(mode: .create(record: record))
         }
+        .confirmationDialog(
+            deletingCategory.map { "「\($0.displayName)」を削除しますか?" } ?? "",
+            isPresented: Binding(
+                get: { deletingCategory != nil },
+                set: { if !$0 { deletingCategory = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("カテゴリなしに分類") {
+                if let cat = deletingCategory { performDelete(category: cat, deleteExpenses: false) }
+                deletingCategory = nil
+            }
+            Button("カテゴリと支出をすべて削除", role: .destructive) {
+                if let cat = deletingCategory { performDelete(category: cat, deleteExpenses: true) }
+                deletingCategory = nil
+            }
+            Button("キャンセル", role: .cancel) { deletingCategory = nil }
+        } message: {
+            Text("このカテゴリを使っている支出を「カテゴリなし」に変えてカテゴリのみ削除するか、支出ごとすべて削除するかを選んでください。")
+        }
+    }
+
+    /// ダイアログで選択された方針に従ってカテゴリを削除する。
+    /// (実装は EditCategoryView と共有)
+    private func performDelete(category: ExpenseCategory, deleteExpenses: Bool) {
+        EditCategoryView.deleteCategory(
+            category,
+            deleteExpenses: deleteExpenses,
+            in: viewContext
+        )
+        Haptics.warning()
     }
 
     @ViewBuilder
@@ -69,13 +102,7 @@ struct CategoryListView: View {
                     editingCategory = cat
                 } label: {
                     HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(cat.tint.opacity(0.18))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: cat.displaySymbol)
-                                .foregroundStyle(cat.tint)
-                        }
+                        CategoryIconView(category: cat, size: 36)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(cat.displayName)
                                 .foregroundStyle(.primary)
@@ -93,13 +120,10 @@ struct CategoryListView: View {
                 }
                 .buttonStyle(.plain)
                 .swipeActions {
-                    if !cat.isBuiltIn {
-                        Button(role: .destructive) {
-                            viewContext.delete(cat)
-                            PersistenceController.shared.save()
-                        } label: {
-                            Label("削除", systemImage: "trash")
-                        }
+                    Button(role: .destructive) {
+                        deletingCategory = cat
+                    } label: {
+                        Label("削除", systemImage: "trash")
                     }
                 }
             }

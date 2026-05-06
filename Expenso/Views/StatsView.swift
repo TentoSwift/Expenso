@@ -387,10 +387,8 @@ struct StatsView: View {
             Text("カテゴリ別内訳")
                 .font(.headline)
             ForEach(byCategory) { item in
-                HStack {
-                    Image(systemName: item.symbol)
-                        .foregroundStyle(item.tint)
-                        .frame(width: 28)
+                HStack(spacing: 10) {
+                    CategoryIconView(symbol: item.symbol, tint: item.tint, size: 28)
                     Text(item.name)
                     Spacer()
                     Text(CurrencyCatalog.format(item.total, code: primaryCurrencyCode))

@@ -123,41 +123,10 @@ struct CloudSharingView: View {
                 Text("このシートはオーナーから共有されています。シートのデータはオーナー側と同期され、あなたは追加・編集ができます。")
             }
 
-            if let share = existingShare, !share.participants.isEmpty {
+            // premiumForm (オーナー画面) と同じ条件・同じレンダラで参加者を表示する。
+            if let share = existingShare {
                 participantsSection(share: share)
                 shareIDSection(share: share)
-            } else {
-                Section {
-                    HStack(spacing: 10) {
-                        if isLoadingShare {
-                            ProgressView()
-                            Text("共有情報を取得中...")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Image(systemName: "person.2.slash")
-                                .foregroundStyle(.secondary)
-                            Text(existingShare == nil
-                                 ? "共有情報をまだ取得できていません"
-                                 : "他の参加者はまだいません")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                Task { await refreshShareAsync() }
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(isLoadingShare)
-                        }
-                    }
-                    .font(.subheadline)
-                } header: {
-                    Text("参加者")
-                } footer: {
-                    if existingShare == nil {
-                        Text("CloudKit との同期にしばらく時間がかかる場合があります。引き下げて更新するか、再読み込みボタンをタップしてください。")
-                    }
-                }
             }
 
             Section {
