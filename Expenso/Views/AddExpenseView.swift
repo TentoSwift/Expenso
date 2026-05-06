@@ -505,18 +505,9 @@ struct AddExpenseView: View {
                             recomputeTitleSuggestion()
                             return
                         }
-                        // 種別が変わって既存カテゴリが合わない時だけ、新 kind の先頭カテゴリにリセット
-                        if let sheet = contextSheet {
-                            let cats = (sheet.categories as? Set<ExpenseCategory>) ?? []
-                            let filtered = cats.filter { c in
-                                let raw = c.kindRaw ?? ""
-                                return raw == newKind.rawValue ||
-                                       (newKind == .expense && raw.isEmpty)
-                            }
-                            let sorted = filtered.sorted { $0.sortOrder < $1.sortOrder }
-                            selectedCategory = sorted.first
-                        }
-                        // 新 kind に合った候補を引き直す
+                        // 種別が変わって既存カテゴリが合わない時は未分類に戻す
+                        // (= 自動で先頭カテゴリにリセットせず、ユーザー / AI 提案が選ぶ)
+                        selectedCategory = nil
                         recomputeTitleSuggestion()
                     }
                 }
@@ -919,11 +910,8 @@ struct AddExpenseView: View {
         switch mode {
         case .create(let record):
             currencyCode = record.resolvedDefaultCurrencyCode
-            if selectedCategory == nil {
-                let cats = (record.categories as? Set<ExpenseCategory>) ?? []
-                let sorted = cats.sorted { $0.sortOrder < $1.sortOrder }
-                selectedCategory = sorted.first(where: { $0.name == "食費" }) ?? sorted.first
-            }
+            // カテゴリは未分類 (nil) スタート。AI / 過去履歴 / 手動の提案で埋める。
+            selectedCategory = nil
             if selectedPayer == nil {
                 let req = NSFetchRequest<Member>(entityName: "Member")
                 req.sortDescriptors = [NSSortDescriptor(keyPath: \Member.sortOrder, ascending: true)]
