@@ -665,7 +665,11 @@ struct AddExpenseView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
+                    Button(role: .cancel) {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
                 }
                 if case .create = mode {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -683,13 +687,18 @@ struct AddExpenseView: View {
                                 Label("写真ライブラリから", systemImage: "photo.on.rectangle")
                             }
                         } label: {
-                            Label("レシートから読み込み", systemImage: "text.viewfinder")
+                            Image(systemName: "text.viewfinder")
                         }
                     }
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { trySave() }
-                        .disabled(!canSave)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .confirm) {
+                        trySave()
+                    } label: {
+                        Image(systemName: "checkmark")
+                    }
+                    .disabled(!canSave)
                 }
             }
             .confirmationDialog(
