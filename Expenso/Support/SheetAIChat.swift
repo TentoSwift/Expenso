@@ -9,16 +9,18 @@
 
 import Foundation
 import Combine
+import CoreData
+import CryptoKit
 import FoundationModels
 
 @MainActor
 final class SheetAIChat: ObservableObject {
-    struct Message: Identifiable, Equatable {
-        enum Role { case user, assistant, error }
-        let id = UUID()
+    struct Message: Identifiable, Equatable, Codable {
+        enum Role: String, Codable { case user, assistant, error }
+        var id = UUID()
         let role: Role
         var text: String
-        let createdAt: Date = .now
+        var createdAt: Date = .now
     }
 
     @Published private(set) var messages: [Message] = []
@@ -27,20 +29,29 @@ final class SheetAIChat: ObservableObject {
 
     private let sheet: ExpenseSheet
     private let session: LanguageModelSession?
+    /// 履歴 JSON の保存先 (Application Support 配下、シートごとに別ファイル)
+    private let historyURL: URL
 
     init(sheet: ExpenseSheet) {
         self.sheet = sheet
+        self.historyURL = Self.historyFileURL(for: sheet)
+
         if SystemLanguageModel.default.availability == .available {
             let context = Self.buildContext(for: sheet)
             let instructions = Self.systemInstructions(context: context)
             self.session = LanguageModelSession(instructions: instructions)
-            // ウェルカムメッセージ
-            self.messages = [
-                Message(
-                    role: .assistant,
-                    text: "「\(sheet.displayName)」の支出について何でも聞いてください。\n例: 「今月の食費は?」「先週いちばん多く使った日は?」"
-                )
-            ]
+
+            // 永続化された履歴があれば復元、なければウェルカム
+            if let saved = Self.loadMessages(from: historyURL), !saved.isEmpty {
+                self.messages = saved
+            } else {
+                self.messages = [
+                    Message(
+                        role: .assistant,
+                        text: "「\(sheet.displayName)」の支出について何でも聞いてください。\n例: 「今月の食費は?」「先週いちばん多く使った日は?」"
+                    )
+                ]
+            }
         } else {
             self.session = nil
             self.messages = [
@@ -72,7 +83,10 @@ final class SheetAIChat: ObservableObject {
         isThinking = true
 
         Task { @MainActor in
-            defer { isThinking = false }
+            defer {
+                isThinking = false
+                saveMessages()
+            }
             do {
                 let stream = session.streamResponse(to: trimmed)
                 for try await partial in stream {
@@ -109,6 +123,66 @@ final class SheetAIChat: ObservableObject {
         ]
         // session 自体は同じものを引き続き使う (instructions は不変)。
         // 過去の Q&A 履歴は LLM 内部で保持されているが、reset 表示で UX 上は新規扱い。
+        saveMessages()
+    }
+
+    // MARK: - Persistence
+
+    /// 現在の messages を historyURL に JSON で書き出す。
+    /// ストリーミング中の partial は重いので、`send` の defer / `resetConversation` から
+    /// 最終形のみ書く運用。
+    private func saveMessages() {
+        let url = historyURL
+        let snapshot = messages
+        // Disk I/O はメインから外す。
+        Task.detached(priority: .background) {
+            do {
+                let dir = url.deletingLastPathComponent()
+                try FileManager.default.createDirectory(
+                    at: dir, withIntermediateDirectories: true
+                )
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(snapshot)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                #if DEBUG
+                print("⚠️ SheetAIChat saveMessages: \(error)")
+                #endif
+            }
+        }
+    }
+
+    private static func loadMessages(from url: URL) -> [Message]? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([Message].self, from: data)
+        } catch {
+            #if DEBUG
+            print("⚠️ SheetAIChat loadMessages: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    /// シートごとの履歴ファイル URL。
+    /// objectID URI を SHA256 してファイル名にする (URI に含まれる /, : を避けるため)。
+    private static func historyFileURL(for sheet: ExpenseSheet) -> URL {
+        let uri = sheet.objectID.uriRepresentation().absoluteString
+        let hash = SHA256.hash(data: Data(uri.utf8))
+        let filename = hash.map { String(format: "%02x", $0) }.joined()
+        let support = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? FileManager.default.temporaryDirectory
+        return support
+            .appendingPathComponent("AIChat", isDirectory: true)
+            .appendingPathComponent("\(filename).json")
     }
 
     // MARK: - Context construction
