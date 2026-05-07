@@ -1361,30 +1361,27 @@ struct AddExpenseView: View {
 }
 
 /// 各サブ view (CategoryPickerView 等) を NavigationLink で push する時に
-/// この wrapper でくるんで、自前の「戻るボタン」を leading に置き、その
-/// ボタンに `DiscardConfirmModifier` を当てる。
-/// 自動の back chevron は `.navigationBarBackButtonHidden(true)` で隠す。
-/// これで `showDiscardConfirm` が立った時、push 中のサブ view にも
-/// 確実な anchor (= 戻るボタン) を持つダイアログが出せる。
+/// この wrapper でくるんで、`.cancellationAction` 位置に **透明な 0pt の
+/// プレースホルダ** を置き、それに `DiscardConfirmModifier` を当てる。
+/// 自動の back chevron は触らない。
+/// これで `showDiscardConfirm` が立った時、push 中のサブ view でも、
+/// 透明アンカーから confirmation dialog が確実に出せる。
 private struct DiscardGuardedBack<Content: View>: View {
-    @Environment(\.dismiss) private var dismiss
     let modifier: DiscardConfirmModifier
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         content()
-            .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.backward")
-                            Text("戻る")
-                        }
-                    }
-                    .modifier(modifier)
+                ToolbarItem(placement: .cancellationAction) {
+                    // 0pt × 0pt の透明 view。タップ判定もアクセシビリティも
+                    // なく、toolbar の見た目には影響しないが、SwiftUI の
+                    // confirmationDialog がアンカーする実体として存在する。
+                    Color.clear
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                        .modifier(modifier)
                 }
             }
     }
