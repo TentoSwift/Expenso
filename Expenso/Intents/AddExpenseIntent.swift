@@ -186,9 +186,9 @@ struct AddExpenseIntent: AppIntent {
             options.append(ExpenseCategoryEntity(
                 id: suggestedCat.objectID.uriRepresentation().absoluteString,
                 name: suggestedCat.displayName,
-                sheetName: "✨ AI 推奨",
+                sheetName: "AI 推奨",
                 kindRaw: suggestedCat.kindRaw ?? TransactionKind.expense.rawValue,
-                symbol: suggestedCat.displaySymbol
+                symbol: "apple.intelligence"
             ))
         }
         let sortedOthers = kindCats
