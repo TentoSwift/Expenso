@@ -36,6 +36,8 @@ struct AddExpenseView: View {
     @State private var date: Date = .now
     @State private var note: String = ""
     @State private var didLoad: Bool = false
+    @State private var isDirty: Bool = false
+    @State private var showDiscardConfirm: Bool = false
     @State private var showCameraScanner: Bool = false
     @State private var showPhotoScanner: Bool = false
     @State private var showingTemplatePicker: Bool = false
@@ -493,6 +495,26 @@ struct AddExpenseView: View {
         contextSheet?.tint ?? .accentColor
     }
 
+    /// 入力されている (= 閉じる前に確認すべき) 状態か。
+    /// load 完了前の State 初期化や onAppear 由来の変化はノイズなので
+    /// `didLoad` で間引いた `isDirty` を採用する。
+    private var hasUnsavedChanges: Bool {
+        didLoad && isDirty
+    }
+
+    private func markDirty() {
+        guard didLoad else { return }
+        isDirty = true
+    }
+
+    private func attemptDismiss() {
+        if hasUnsavedChanges {
+            showDiscardConfirm = true
+        } else {
+            dismiss()
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -504,6 +526,7 @@ struct AddExpenseView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: kind) { _, newKind in
+                        markDirty()
                         // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
                         // (編集ロード時に State が `.expense` 既定値 → `.income` に変わって onChange が
                         //  発火するレースで、復元したばかりのカテゴリが上書きされるのを防ぐ)
@@ -523,6 +546,7 @@ struct AddExpenseView: View {
                 Section("内容") {
                     TextField(kind == .expense ? "タイトル (例: スーパー)" : "タイトル (例: 給料)", text: $title)
                         .onChange(of: title) { _, _ in
+                            markDirty()
                             recomputeTitleSuggestion()
                         }
                     HStack(spacing: 6) {
@@ -537,6 +561,7 @@ struct AddExpenseView: View {
                                     ? new.filter { $0.isNumber || $0 == "." }
                                     : new.filter { $0.isNumber }
                                 if allowed != new { amountText = allowed }
+                                markDirty()
                             }
                     }
                     Picker("通貨", selection: $currencyCode) {
@@ -652,12 +677,37 @@ struct AddExpenseView: View {
                 }
             }
             .tint(sheetTint)
+            .modifier(DirtyTrackingModifier(
+                currencyCode: currencyCode,
+                categoryID: selectedCategory?.objectID,
+                payerID: selectedPayer?.objectID,
+                date: date,
+                note: note,
+                onChange: markDirty
+            ))
+            .interactiveDismissDisabled(hasUnsavedChanges)
+            .onAttemptToDismiss(
+                shouldAllowDismiss: { !hasUnsavedChanges },
+                onAttempt: { showDiscardConfirm = true }
+            )
+            .confirmationDialog(
+                "変更を破棄しますか?",
+                isPresented: $showDiscardConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("変更を破棄", role: .destructive) {
+                    dismiss()
+                }
+                Button("編集を続ける", role: .cancel) {}
+            } message: {
+                Text("入力中の内容は保存されません。")
+            }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) {
-                        dismiss()
+                        attemptDismiss()
                     } label: {
                         Image(systemName: "xmark")
                     }
@@ -1144,6 +1194,26 @@ struct AddExpenseView: View {
         rule.startDate = Calendar.current.startOfDay(for: startDate)
         rule.endDate = hasEndDate ? Calendar.current.startOfDay(for: endDate) : nil
         return rule
+    }
+}
+
+/// AddExpenseView の `.onChange` を 1 つの ViewModifier にまとめるためのヘルパ。
+/// body に直接 5 連 `.onChange` を並べると型推論がタイムアウトするので分離。
+private struct DirtyTrackingModifier: ViewModifier {
+    let currencyCode: String
+    let categoryID: NSManagedObjectID?
+    let payerID: NSManagedObjectID?
+    let date: Date
+    let note: String
+    let onChange: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: currencyCode) { _, _ in onChange() }
+            .onChange(of: categoryID) { _, _ in onChange() }
+            .onChange(of: payerID) { _, _ in onChange() }
+            .onChange(of: date) { _, _ in onChange() }
+            .onChange(of: note) { _, _ in onChange() }
     }
 }
 
