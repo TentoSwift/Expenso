@@ -155,13 +155,19 @@ final class PurchaseManager: ObservableObject {
         let nowPremium = !ids.intersection(Self.premiumProductIDs).isEmpty
         UserDefaults.standard.set(nowPremium, forKey: Self.isPremiumKey)
 
-        // Premium が切れた検出時は通知だけ出して、既存の共有は触らない。
-        // 自動 revoke は StoreKit の transient 失敗 (currentEntitlements が一時的に空) で
-        // 本物の Premium ユーザーの共有を誤って消すリスクが大きい。
-        // 新規共有作成は UI 側で `isPremium` ゲートしているので、課金が切れた状態で
-        // 共有が増えることはない。
+        // Premium が切れた検出時:
+        // 1) AppStore.sync を 1 度かけて transient 失敗で本物の Premium ユーザーの
+        //    共有を誤消去しないように再確認
+        // 2) それでも非 Premium が確定したら、自分が所有する全 CKShare の参加者を
+        //    削除 + 公開リンクを無効化 (= 共有を実質解除)
+        // 3) 通知を投げて UI に「Premium が終了しました。共有を解除しました」を出す
         if wasPremium && !nowPremium {
-            NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
+            Task { @MainActor in
+                let confirmedExpired = await Self.confirmExpiry()
+                guard confirmedExpired else { return }
+                await ShareCoordinator.shared.revokeAllOwnedShares()
+                NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
+            }
         }
 
         // 自分の Premium 状態を Core Data 側にミラー:
@@ -170,6 +176,27 @@ final class PurchaseManager: ObservableObject {
         // CloudKit 同期で他参加者にも届くので、彼らの「シート上限・カテゴリ上限」
         // 判定にも使える。
         await Self.propagatePremiumFlag(nowPremium)
+    }
+
+    /// `AppStore.sync` 後にもう 1 度 `Transaction.currentEntitlements` を
+    /// 走査し、本当に Premium が無いか確認する。transient 失敗での誤判定を抑える。
+    /// - Returns: 再確認しても非 Premium なら `true` (= 解除を実行してよい)
+    @MainActor
+    private static func confirmExpiry() async -> Bool {
+        try? await AppStore.sync()
+        var ids: Set<String> = []
+        for await result in Transaction.currentEntitlements {
+            if case .verified(let t) = result, t.revocationDate == nil {
+                ids.insert(t.productID)
+            }
+        }
+        let stillNotPremium = ids.intersection(premiumProductIDs).isEmpty
+        if !stillNotPremium {
+            // transient だった → Premium 状態を再確立
+            UserDefaults.standard.set(true, forKey: isPremiumKey)
+            shared.purchasedIDs = ids
+        }
+        return stillNotPremium
     }
 
     /// 全シートを走査し、自分の Premium 状態をミラーリングする。
