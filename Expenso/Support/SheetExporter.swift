@@ -121,6 +121,20 @@ enum SheetExporter {
         let bodyFont = UIFont.systemFont(ofSize: 12, weight: .regular)
         let subFont = UIFont.systemFont(ofSize: 11, weight: .regular)
 
+        // PDF コンテキストには UITraitCollection が無く UIColor.label など動的色は
+        // 解決されない (= 透明として扱われテキストが見えない)。具体色を使う。
+        let primaryColor = UIColor.black
+        let secondaryColor = UIColor.darkGray
+        let separatorColor = UIColor.lightGray
+
+        func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor) {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color
+            ]
+            NSAttributedString(string: text, attributes: attrs).draw(at: point)
+        }
+
         let expenses = ((sheet.expenses as? Set<Expense>) ?? [])
             .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
 
@@ -132,18 +146,12 @@ enum SheetExporter {
         ctx.beginPage()
         var y: CGFloat = margin
 
-        let title = sheet.displayName as NSString
-        title.draw(
-            at: CGPoint(x: margin, y: y),
-            withAttributes: [.font: titleFont, .foregroundColor: UIColor.label]
-        )
+        draw(sheet.displayName, at: CGPoint(x: margin, y: y),
+             font: titleFont, color: primaryColor)
         y += titleFont.lineHeight + 8
 
-        let subtitle = "Expenso レポート (\(df.string(from: .now)) 出力)" as NSString
-        subtitle.draw(
-            at: CGPoint(x: margin, y: y),
-            withAttributes: [.font: subFont, .foregroundColor: UIColor.secondaryLabel]
-        )
+        draw("Expenso レポート (\(df.string(from: .now)) 出力)",
+             at: CGPoint(x: margin, y: y), font: subFont, color: secondaryColor)
         y += subFont.lineHeight + 24
 
         let totalExpense = expenses.filter { $0.kind == .expense }
@@ -157,12 +165,17 @@ enum SheetExporter {
             ("収入合計", totalIncome),
             ("差引",   net)
         ] {
-            let line = "\(label):  \(CurrencyCatalog.format(value, code: code))" as NSString
-            line.draw(
-                at: CGPoint(x: margin, y: y),
-                withAttributes: [.font: bodyFont, .foregroundColor: UIColor.label]
-            )
+            let line = "\(label):  \(CurrencyCatalog.format(value, code: code))"
+            draw(line, at: CGPoint(x: margin, y: y),
+                 font: bodyFont, color: primaryColor)
             y += bodyFont.lineHeight + 6
+        }
+
+        if expenses.isEmpty {
+            y += 12
+            draw("(まだ支出 / 収入が記録されていません)",
+                 at: CGPoint(x: margin, y: y),
+                 font: subFont, color: secondaryColor)
         }
 
         // ===== Page 2+: 月別 =====
@@ -184,49 +197,40 @@ enum SheetExporter {
             var py: CGFloat = margin
 
             let monthDate = cal.date(from: comps) ?? .now
-            let h = monthHeader.string(from: monthDate) as NSString
-            h.draw(
-                at: CGPoint(x: margin, y: py),
-                withAttributes: [.font: h2Font, .foregroundColor: UIColor.label]
-            )
+            draw(monthHeader.string(from: monthDate),
+                 at: CGPoint(x: margin, y: py),
+                 font: h2Font, color: primaryColor)
             py += h2Font.lineHeight + 12
 
             let items = byMonth[comps] ?? []
             let mExp = items.filter { $0.kind == .expense }.reduce(Decimal(0)) { $0 + $1.amountDecimal }
             let mInc = items.filter { $0.kind == .income }.reduce(Decimal(0)) { $0 + $1.amountDecimal }
 
-            let sum = "支出 \(CurrencyCatalog.format(mExp, code: code))    収入 \(CurrencyCatalog.format(mInc, code: code))" as NSString
-            sum.draw(
-                at: CGPoint(x: margin, y: py),
-                withAttributes: [.font: bodyFont, .foregroundColor: UIColor.secondaryLabel]
-            )
+            draw("支出 \(CurrencyCatalog.format(mExp, code: code))    収入 \(CurrencyCatalog.format(mInc, code: code))",
+                 at: CGPoint(x: margin, y: py),
+                 font: bodyFont, color: secondaryColor)
             py += bodyFont.lineHeight + 16
 
-            // カテゴリ別内訳 (支出のみ、合計の降順)
             let byCategory = Dictionary(grouping: items.filter { $0.kind == .expense }) { $0.categoryDisplayName }
             let rows = byCategory.map { (name, items) -> (String, Decimal, Int) in
                 let sum = items.reduce(Decimal(0)) { $0 + $1.amountDecimal }
                 return (name, sum, items.count)
             }.sorted { $0.1 > $1.1 }
 
-            ("カテゴリ別 (支出):" as NSString).draw(
-                at: CGPoint(x: margin, y: py),
-                withAttributes: [.font: bodyFont, .foregroundColor: UIColor.label]
-            )
+            draw("カテゴリ別 (支出):",
+                 at: CGPoint(x: margin, y: py),
+                 font: bodyFont, color: primaryColor)
             py += bodyFont.lineHeight + 4
 
             for (name, total, count) in rows {
                 guard py < pageRect.height - margin - bodyFont.lineHeight else { break }
-                let line = "  \(name):  \(CurrencyCatalog.format(total, code: code))  (\(count) 件)" as NSString
-                line.draw(
-                    at: CGPoint(x: margin, y: py),
-                    withAttributes: [.font: subFont, .foregroundColor: UIColor.label]
-                )
+                draw("  \(name):  \(CurrencyCatalog.format(total, code: code))  (\(count) 件)",
+                     at: CGPoint(x: margin, y: py),
+                     font: subFont, color: primaryColor)
                 py += subFont.lineHeight + 2
             }
 
-            // 横線で区切り
-            UIColor.separator.setStroke()
+            separatorColor.setStroke()
             let path = UIBezierPath()
             path.move(to: CGPoint(x: margin, y: py + 8))
             path.addLine(to: CGPoint(x: margin + contentWidth, y: py + 8))
