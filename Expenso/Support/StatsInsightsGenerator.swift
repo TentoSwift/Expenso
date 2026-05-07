@@ -68,15 +68,23 @@ enum StatsInsightsGenerator {
         - 各気づきは具体的な金額・カテゴリ名・日付・前月比など、入力に含まれる数値を**引用**する。
         - 一般論や挨拶は書かない。「外食を控えましょう」のような提言ではなく、観察に徹する。
         - 重複・矛盾しないようにバリエーションを出す (例: カテゴリ・支払者・日別・前月比から多角的に)。
-        - severity の判定 (種別が「支出」の場合):
-          * positive: 支出が前月比で減少した / カテゴリ支出が削減された / 件数が減った など、ユーザーにとって嬉しい変化
-          * warning: 支出が大きく増加した / 単日で突出した出費があった など、注意が必要な変化
-          * info: 増減の方向が中立 / 全体観察 / 構成比など、良い悪いの判断が難しい事実
-        - severity の判定 (種別が「収入」の場合):
+
+        前月比較の解釈:
+        - 個別カテゴリの前月比は、そのカテゴリ行末尾の「前月: ¥X (+/-Y%)」の値だけを使うこと。
+        - カテゴリ行に「前月は記録なし」とあれば **新規発生** のカテゴリ。「減少」「削減」「節約」と決して呼ばない。今月初めて出た支出として扱う。
+        - 数値・符号は提供された通りに引用する。「前月比: 0」のような勝手な数値は作らない。
+        - 全体合計 (`今月全体` / `先月全体`) は全カテゴリの合計値。これを個別カテゴリの前月比として転用しない。前月比に言及する時は、その値の出どころが当該カテゴリ行であることを必ず確認する。
+
+        severity の判定 (種別が「支出」の場合):
+          * positive: 支出が **前月比で減少した** / カテゴリ支出が削減された / 件数が減った など、ユーザーにとって嬉しい変化 (前月データがある場合のみ)
+          * warning: 支出が大きく増加した / 単日で突出した出費があった / 新規カテゴリで高額支出が発生した など、注意が必要な変化
+          * info: 増減の方向が中立 / 全体観察 / 構成比 / 新規カテゴリの中立観察 など
+        severity の判定 (種別が「収入」の場合):
           * positive: 収入が増加した
           * warning: 収入が大きく減少した
           * info: 中立的な事実
-        - 「減少」「削減」「節約」「下回った」などの語が含まれ、それがユーザーにとって望ましい場合は必ず positive を選ぶこと。
+
+        体裁:
         - title は 20 文字以内・絵文字なし・句読点で終わらない。
         - body は 1〜2 文・具体的な数値を含める。**強調したい数値や語句には Markdown の太字 (`**...**`) を使ってよい**。
         """
@@ -162,14 +170,11 @@ enum StatsInsightsGenerator {
             lines.append("月: \(monthLabel)")
             lines.append("種別: \(kindLabel)")
             lines.append("通貨: \(currencyCode)")
-            lines.append("今月合計: \(format(totalAmount)) (\(totalCount) 件)")
-            lines.append("前月合計: \(format(previousMonthTotal)) (\(previousMonthCount) 件)")
-            if let pct = diffPercent {
-                let sign = pct >= 0 ? "+" : ""
-                lines.append("前月比: \(sign)\(String(format: "%.1f", pct))%")
-            } else {
-                lines.append("前月比: (前月データなし)")
-            }
+            lines.append("今月全体: \(format(totalAmount)) (\(totalCount) 件)")
+            lines.append("先月全体: \(format(previousMonthTotal)) (\(previousMonthCount) 件)")
+            // ※ ここに全体の前月比 (例: +88.5%) を書くと、LLM が個別カテゴリの数字として
+            //   誤って引用するハルシネーションが起きやすい。必要ならカテゴリ行の `前月: …`
+            //   を使って LLM 側で計算させる。
             lines.append("")
 
             lines.append("カテゴリ別 (上位):")
@@ -183,9 +188,10 @@ enum StatsInsightsGenerator {
                         let prevD = NSDecimalNumber(decimal: prev).doubleValue
                         let pct = ((cur - prevD) / prevD) * 100
                         let sign = pct >= 0 ? "+" : ""
-                        row += " — 前月 \(format(prev)) (\(sign)\(String(format: "%.1f", pct))%)"
-                    } else if c.prevAmount != nil {
-                        row += " — 前月なし"
+                        row += " — 前月: \(format(prev)) (\(sign)\(String(format: "%.1f", pct))%)"
+                    } else {
+                        // prevAmount == nil または 0 → 前月は記録が無い (= 新規カテゴリ)
+                        row += " — 前月は記録なし (= 今月から発生したカテゴリ)"
                     }
                     lines.append(row)
                 }
