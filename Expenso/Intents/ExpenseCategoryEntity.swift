@@ -98,26 +98,47 @@ extension ExpenseCategoryEntity {
         renderBadge(symbol: name, colorHex: colorHex)
     }
 
-    /// AI 提案用: 「色付き円 + 白 symbol」のバッジ + その隣に apple.intelligence を
-    /// 横並びで合成した PNG Data を返す。
+    /// AI 提案用: 「色付き円 + 白 symbol」バッジの右下に apple.intelligence を
+    /// 重ねて合成した PNG Data を返す。
     @MainActor
     static func renderAISuggestionSymbol(_ name: String, colorHex: String) -> Data? {
         let badgeSize: CGFloat = 96
         guard let badge = renderBadgeImage(symbol: name, colorHex: colorHex, size: badgeSize)
         else { return renderColoredSymbol(name, colorHex: colorHex) }
 
-        let aiCfg = UIImage.SymbolConfiguration(pointSize: badgeSize * 0.72, weight: .semibold)
+        // バッジ径の 50% で右下にオーバーレイ。白い縁取りで「ステッカー」風にする。
+        let aiSize: CGFloat = badgeSize * 0.50
+        let aiCfg = UIImage.SymbolConfiguration(pointSize: aiSize * 0.78, weight: .semibold)
         guard let ai = UIImage(systemName: "apple.intelligence", withConfiguration: aiCfg)?
             .withTintColor(.systemPurple, renderingMode: .alwaysOriginal)
         else { return badge.pngData() }
 
-        let gap: CGFloat = 12
-        let canvasW = badge.size.width + gap + ai.size.width
-        let canvasH = max(badge.size.height, ai.size.height)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: canvasW, height: canvasH))
-        return renderer.image { _ in
-            badge.draw(at: CGPoint(x: 0, y: (canvasH - badge.size.height) / 2))
-            ai.draw(at: CGPoint(x: badge.size.width + gap, y: (canvasH - ai.size.height) / 2))
+        // overlap させたいので少しはみ出させる。
+        let overlap: CGFloat = aiSize * 0.18
+        let canvas = CGSize(width: badgeSize + overlap, height: badgeSize + overlap)
+        let renderer = UIGraphicsImageRenderer(size: canvas)
+        return renderer.image { ctx in
+            // バッジ本体を左上に。
+            badge.draw(at: .zero)
+
+            // 右下に白い円 (= ステッカーの縁) を描画。
+            let stickerRect = CGRect(
+                x: canvas.width - aiSize,
+                y: canvas.height - aiSize,
+                width: aiSize,
+                height: aiSize
+            )
+            ctx.cgContext.saveGState()
+            UIColor.white.setFill()
+            UIBezierPath(ovalIn: stickerRect).fill()
+            ctx.cgContext.restoreGState()
+
+            // 白円の中央に apple.intelligence を載せる。
+            let aiOrigin = CGPoint(
+                x: stickerRect.midX - ai.size.width  / 2,
+                y: stickerRect.midY - ai.size.height / 2
+            )
+            ai.draw(at: aiOrigin)
         }.pngData()
     }
 
