@@ -685,11 +685,9 @@ struct AddExpenseView: View {
                 note: note,
                 onChange: markDirty
             ))
-            // `interactiveDismissDisabled` で `isModalInPresentation = true` を
-            // 立てると、スワイプは UIKit 側でブロックされた上で
-            // `presentationControllerDidAttemptToDismiss` が呼ばれる。
-            // ブリッジ側はそれを `onAttempt` に流す。
-            .interactiveDismissDisabled(hasUnsavedChanges)
+            // ブリッジ側 (DismissAwareHostingController.reapplyGuards) が
+            // isModalInPresentation を直接面倒見るので、
+            // `.interactiveDismissDisabled` は併用しない。
             .onAttemptToDismiss(
                 shouldAllowDismiss: { !hasUnsavedChanges },
                 onAttempt: { showDiscardConfirm = true }
