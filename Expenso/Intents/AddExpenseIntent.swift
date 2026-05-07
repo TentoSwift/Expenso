@@ -204,14 +204,18 @@ struct AddExpenseIntent: AppIntent {
         for cat in sortedOthers {
             options.append(ExpenseCategoryEntity.from(cat))
         }
+        let unfiledColor = "#8E8E93"
         options.append(ExpenseCategoryEntity(
             id: Self.skipCategoryID,
             name: "未分類のまま",
             sheetName: "(カテゴリなしで保存)",
             kindRaw: "",
-            symbol: "questionmark.circle",
-            colorHex: "#8E8E93",
-            iconData: nil
+            symbol: "list.bullet",
+            colorHex: unfiledColor,
+            iconData: ExpenseCategoryEntity.renderColoredSymbol(
+                "list.bullet",
+                colorHex: unfiledColor
+            )
         ))
 
         let dialog: IntentDialog = {

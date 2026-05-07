@@ -119,7 +119,7 @@ struct StatsView: View {
             return CategorySummary(
                 name: key,
                 tint: value.first?.categoryTint ?? .gray,
-                symbol: value.first?.categorySymbol ?? "ellipsis.circle",
+                symbol: value.first?.categorySymbol ?? "list.bullet",
                 total: total,
                 count: value.count
             )

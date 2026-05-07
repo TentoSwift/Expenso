@@ -179,6 +179,6 @@ extension Expense {
     }
 
     var categorySymbol: String {
-        resolvedCategory?.displaySymbol ?? "ellipsis.circle"
+        resolvedCategory?.displaySymbol ?? "list.bullet"
     }
 }

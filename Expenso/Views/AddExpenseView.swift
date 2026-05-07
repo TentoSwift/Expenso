@@ -170,9 +170,9 @@ struct AddExpenseView: View {
             if isComputingAICategory {
                 Section {
                     HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(Color.accentColor)
-                        Text("AI でカテゴリを推測中…")
+                        Image(systemName: "apple.intelligence")
+                            .foregroundStyle(Color.purple)
+                        (Text(Image(systemName: "apple.intelligence")) + Text(" でカテゴリを推測中…"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -188,10 +188,10 @@ struct AddExpenseView: View {
                         Haptics.success()
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "sparkles")
-                                .foregroundStyle(Color.accentColor)
+                            Image(systemName: "apple.intelligence")
+                                .foregroundStyle(Color.purple)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("AI 推奨カテゴリ")
+                                (Text(Image(systemName: "apple.intelligence")) + Text(" 提案"))
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 HStack(spacing: 6) {
