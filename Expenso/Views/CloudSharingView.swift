@@ -436,6 +436,12 @@ struct CloudSharingView: View {
     private func sendInvitation() async {
         isProcessing = true
         errorMessage = nil
+        // 入力中の TextField のキーボードを下げてから async に入る。
+        // (キーボードが上がったまま CloudKit 完了を待つと UI が固まって見える)
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil
+        )
         do {
             let result = try await ShareCoordinator.shared.invite(
                 email: trimmedEmail,
@@ -444,30 +450,14 @@ struct CloudSharingView: View {
             )
             existingShare = result.share
             pendingURL = result.url
-
-            let data = MailData(
-                recipient: trimmedEmail,
-                subject: "Expenso「\(record.displayName)」への招待",
-                body: """
-                Expenso のシート「\(record.displayName)」に招待されました。
-
-                権限: \(permission == .readWrite ? "編集可能" : "閲覧のみ")
-
-                下のリンクをタップしてシートに参加してください。
-
-                \(result.url.absoluteString)
-
-                — Expenso
-                """
-            )
-            if MFMailComposeViewController.canSendMail() {
-                mailData = data
-            } else {
-                showMailUnavailable = true
-            }
-
             email = ""
             participantsRefresh += 1
+            Haptics.success()
+            // 以前は MFMailComposeViewController を自動で sheet 提示していたが、
+            // iOS 26 + Liquid Glass 環境で sheet 二重提示が引っ掛かって UI が
+            // 固まる症状が出ていたので撤去。招待は CloudKit 側で送信済みなので、
+            // 下の `shareLinkSection` の ShareLink からメール / メッセージ /
+            // AirDrop を選んでもらう運用にする。
         } catch {
             errorMessage = error.localizedDescription
         }
