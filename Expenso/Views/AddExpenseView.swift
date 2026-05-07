@@ -36,7 +36,9 @@ struct AddExpenseView: View {
     @State private var date: Date = .now
     @State private var note: String = ""
     @State private var didLoad: Bool = false
-    @State private var isDirty: Bool = false
+    /// loadIfNeeded の State 代入が落ち着いた直後にキャプチャするスナップショット。
+    /// 現在値と比較して `hasUnsavedChanges` を判定する。
+    @State private var loadedSnapshot: FieldSnapshot?
     @State private var showDiscardConfirm: Bool = false
     @State private var showCameraScanner: Bool = false
     @State private var showPhotoScanner: Bool = false
@@ -495,16 +497,26 @@ struct AddExpenseView: View {
         contextSheet?.tint ?? .accentColor
     }
 
-    /// 入力されている (= 閉じる前に確認すべき) 状態か。
-    /// load 完了前の State 初期化や onAppear 由来の変化はノイズなので
-    /// `didLoad` で間引いた `isDirty` を採用する。
-    private var hasUnsavedChanges: Bool {
-        didLoad && isDirty
+    /// 現在値 (= ユーザーが触っている状態) を 1 つの値にまとめたもの。
+    private var currentSnapshot: FieldSnapshot {
+        FieldSnapshot(
+            title: title,
+            amountText: amountText,
+            kind: kind,
+            currencyCode: currencyCode,
+            categoryID: selectedCategory?.objectID,
+            payerID: selectedPayer?.objectID,
+            date: date,
+            note: note
+        )
     }
 
-    private func markDirty() {
-        guard didLoad else { return }
-        isDirty = true
+    /// 「ロード直後のスナップショット」と「現在値」が違うか。
+    /// 1) load 中は `loadedSnapshot == nil` → false (= ダイアログ出ない)
+    /// 2) ロード完了後にユーザーが何か変えた → スナップショットと差分 → true
+    private var hasUnsavedChanges: Bool {
+        guard let snap = loadedSnapshot else { return false }
+        return snap != currentSnapshot
     }
 
     private func attemptDismiss() {
@@ -526,7 +538,6 @@ struct AddExpenseView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: kind) { _, newKind in
-                        markDirty()
                         // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
                         // (編集ロード時に State が `.expense` 既定値 → `.income` に変わって onChange が
                         //  発火するレースで、復元したばかりのカテゴリが上書きされるのを防ぐ)
@@ -546,7 +557,6 @@ struct AddExpenseView: View {
                 Section("内容") {
                     TextField(kind == .expense ? "タイトル (例: スーパー)" : "タイトル (例: 給料)", text: $title)
                         .onChange(of: title) { _, _ in
-                            markDirty()
                             recomputeTitleSuggestion()
                         }
                     HStack(spacing: 6) {
@@ -561,7 +571,6 @@ struct AddExpenseView: View {
                                     ? new.filter { $0.isNumber || $0 == "." }
                                     : new.filter { $0.isNumber }
                                 if allowed != new { amountText = allowed }
-                                markDirty()
                             }
                     }
                     Picker("通貨", selection: $currencyCode) {
@@ -677,14 +686,6 @@ struct AddExpenseView: View {
                 }
             }
             .tint(sheetTint)
-            .modifier(DirtyTrackingModifier(
-                currencyCode: currencyCode,
-                categoryID: selectedCategory?.objectID,
-                payerID: selectedPayer?.objectID,
-                date: date,
-                note: note,
-                onChange: markDirty
-            ))
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1023,6 +1024,13 @@ struct AddExpenseView: View {
             origRecurringInterval = Int32(recurringInterval)
             origEndDate = hasEndDate ? endDate : nil
         }
+        // ロード時の State 代入が反映されたあと (= 次の runloop) に
+        // スナップショットを撮ることで、「ロード直後 = まだ汚れていない」
+        // 状態を基準値にできる。今 runloop で撮ると、SwiftUI が State の
+        // 反映前なので古い値で確定してしまうことがある。
+        DispatchQueue.main.async {
+            loadedSnapshot = currentSnapshot
+        }
     }
 
     private func save() {
@@ -1200,23 +1208,16 @@ struct AddExpenseView: View {
     }
 }
 
-/// AddExpenseView の `.onChange` を 1 つの ViewModifier にまとめるためのヘルパ。
-/// body に直接 5 連 `.onChange` を並べると型推論がタイムアウトするので分離。
-private struct DirtyTrackingModifier: ViewModifier {
+/// 「閉じる前に確認すべき入力差分」を判定するためのフィールド一覧スナップショット。
+/// `loadIfNeeded` 直後の値と `body` の現在値を `==` 比較して dirty 検知に使う。
+struct FieldSnapshot: Equatable {
+    let title: String
+    let amountText: String
+    let kind: TransactionKind
     let currencyCode: String
     let categoryID: NSManagedObjectID?
     let payerID: NSManagedObjectID?
     let date: Date
     let note: String
-    let onChange: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: currencyCode) { _, _ in onChange() }
-            .onChange(of: categoryID) { _, _ in onChange() }
-            .onChange(of: payerID) { _, _ in onChange() }
-            .onChange(of: date) { _, _ in onChange() }
-            .onChange(of: note) { _, _ in onChange() }
-    }
 }
 
