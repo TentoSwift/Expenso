@@ -532,6 +532,10 @@ private struct SummaryCard: View {
                     // 必要なら自動縮小して伸長は許す。
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+                    // 期間切替や Expense 編集で値が変わった時、桁ごとに
+                    // ロール表示するアニメーション。
+                    .contentTransition(.numericText(value: doubleValue(net)))
+                    .animation(.snappy, value: net)
                 expenseIncomeBreakdown(expense: t.expense, income: t.income)
             }
 
@@ -557,6 +561,13 @@ private struct SummaryCard: View {
             RoundedRectangle(cornerRadius: 18)
                 .fill(tint.opacity(0.18))
         )
+    }
+
+    /// `Decimal` をロール表示用 `Double` に。`Decimal` は直接 `numericText(value:)`
+    /// に渡せないので Double に変換する。±1e15 を超える金額は誤差が出るが、
+    /// 家計簿の合計には十分な精度。
+    private func doubleValue(_ d: Decimal) -> Double {
+        NSDecimalNumber(decimal: d).doubleValue
     }
 
     /// 集計カードのヘッダー (期間 pill + カテゴリ pill + 共有バッジ)。
@@ -640,6 +651,8 @@ private struct SummaryCard: View {
             Label {
                 Text(CurrencyCatalog.format(expense, code: code))
                     .monospacedDigit()
+                    .contentTransition(.numericText(value: doubleValue(expense)))
+                    .animation(.snappy, value: expense)
             } icon: {
                 Image(systemName: "minus.circle")
             }
@@ -648,6 +661,8 @@ private struct SummaryCard: View {
             Label {
                 Text(CurrencyCatalog.format(income, code: code))
                     .monospacedDigit()
+                    .contentTransition(.numericText(value: doubleValue(income)))
+                    .animation(.snappy, value: income)
             } icon: {
                 Image(systemName: "plus.circle")
             }
