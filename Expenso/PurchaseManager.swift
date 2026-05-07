@@ -231,7 +231,7 @@ enum FreeTierLimits {
     static let categoriesPerSheet: Int = 20
     /// 自分が「所有」できるシートの最大数 (= 自分が作成したシートのみカウント、
     /// 共有受け入れシートは数えない)
-    static let ownedSheets: Int = 3
+    static let ownedSheets: Int = 5
 }
 
 extension PurchaseManager {
