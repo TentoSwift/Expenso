@@ -489,6 +489,10 @@ struct AddExpenseView: View {
         }
     }
 
+    private var sheetTint: Color {
+        contextSheet?.tint ?? .accentColor
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -661,6 +665,7 @@ struct AddExpenseView: View {
                     }
                 }
             }
+            .tint(sheetTint)
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -701,7 +706,7 @@ struct AddExpenseView: View {
                         Image(systemName: "checkmark")
                     }
                     .disabled(!canSave)
-                    .tint(contextSheet?.tint ?? .accentColor)
+                    .tint(sheetTint)
                 }
             }
             .confirmationDialog(
