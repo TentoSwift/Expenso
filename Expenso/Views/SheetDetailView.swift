@@ -461,6 +461,7 @@ private struct SummaryCard: View {
     @Binding var period: SheetDetailView.Period
     let selectedCategory: ExpenseCategory?
     @ObservedObject private var fx = FXRatesService.shared
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// 子 Expense の編集 (amount 変更等) は ExpenseSheet の objectWillChange を発火させないため、
     /// `record.expenses` 経由で集計すると view が再描画されない。
@@ -565,24 +566,11 @@ private struct SummaryCard: View {
                     .font(.system(size: 38, weight: .bold).monospacedDigit())
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
-                HStack(spacing: 24) {
-                    Label {
-                        Text(CurrencyCatalog.format(t.expense, code: code))
-                            .monospacedDigit()
-                    } icon: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .foregroundStyle(.secondary)
-
-                    Label {
-                        Text(CurrencyCatalog.format(t.income, code: code))
-                            .monospacedDigit()
-                    } icon: {
-                        Image(systemName: "plus.circle")
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .font(.subheadline)
+                    // ネット合計は固定 38pt なので AX でも 1 行に収まるように
+                    // 必要なら自動縮小して伸長は許す。
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                expenseIncomeBreakdown(expense: t.expense, income: t.income)
             }
 
             // 月予算の進捗バー (今月 + カテゴリ未選択時のみ)
@@ -607,6 +595,42 @@ private struct SummaryCard: View {
             RoundedRectangle(cornerRadius: 18)
                 .fill(tint.opacity(0.18))
         )
+    }
+
+    /// 支出 / 収入の内訳行。AX サイズでは横一列に収まらないので、
+    /// 縦 2 行 (= 各 1 行を full-width) に切り替える。
+    @ViewBuilder
+    private func expenseIncomeBreakdown(expense: Decimal, income: Decimal) -> some View {
+        let expenseLabel = Label {
+            Text(CurrencyCatalog.format(expense, code: code))
+                .monospacedDigit()
+        } icon: {
+            Image(systemName: "minus.circle")
+        }
+        .foregroundStyle(.secondary)
+
+        let incomeLabel = Label {
+            Text(CurrencyCatalog.format(income, code: code))
+                .monospacedDigit()
+        } icon: {
+            Image(systemName: "plus.circle")
+        }
+        .foregroundStyle(.secondary)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                expenseLabel
+                incomeLabel
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 24) {
+                expenseLabel
+                incomeLabel
+            }
+            .font(.subheadline)
+        }
     }
 
     private var hasMultipleCurrencies: Bool {
