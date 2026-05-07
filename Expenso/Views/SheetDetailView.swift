@@ -77,78 +77,6 @@ struct SheetDetailView: View {
     /// 一覧に表示する支出/収入。期間フィルタは適用しない (= 期間ピッカーは
     /// SummaryCard の合計金額にのみ影響し、行の表示は全期間で固定)。
     /// カテゴリピル・検索・並び順はここで適用する。
-    /// 検索中のヒット件数と合計を出すバナー。検索文字列が空 / ヒット 0 件の時は出さない。
-    @ViewBuilder
-    private var searchResultSummary: some View {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty, !filteredExpenses.isEmpty {
-            let totals = searchTotals()
-            let code = record.resolvedDefaultCurrencyCode
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.subheadline)
-                    .foregroundStyle(record.tint)
-                Text("\(filteredExpenses.count) 件")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .contentTransition(.numericText(value: Double(filteredExpenses.count)))
-                    .animation(.snappy, value: filteredExpenses.count)
-                Spacer()
-                if totals.expense > 0 {
-                    Label {
-                        Text(CurrencyCatalog.format(totals.expense, code: code))
-                            .monospacedDigit()
-                            .contentTransition(.numericText(value: doubleValue(totals.expense)))
-                            .animation(.snappy, value: totals.expense)
-                    } icon: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                if totals.income > 0 {
-                    Label {
-                        Text(CurrencyCatalog.format(totals.income, code: code))
-                            .monospacedDigit()
-                            .contentTransition(.numericText(value: doubleValue(totals.income)))
-                            .animation(.snappy, value: totals.income)
-                    } icon: {
-                        Image(systemName: "plus.circle")
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            }
-            .font(.subheadline)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(record.tint.opacity(0.1))
-            )
-            .padding(.horizontal)
-        }
-    }
-
-    private func searchTotals() -> (expense: Decimal, income: Decimal) {
-        let target = record.resolvedDefaultCurrencyCode
-        let fx = FXRatesService.shared
-        var expenseSum: Decimal = 0
-        var incomeSum: Decimal = 0
-        for e in filteredExpenses {
-            let amt = fx.convert(e.amountDecimal, from: e.resolvedCurrencyCode, to: target) ?? e.amountDecimal
-            switch e.kind {
-            case .expense: expenseSum += amt
-            case .income:  incomeSum += amt
-            }
-        }
-        return (expenseSum, incomeSum)
-    }
-
-    /// `Decimal` を numericText 用の `Double` に。SummaryCard 側にあるが
-    /// SheetDetailView (本体) からは見えないので簡易版を再定義。
-    private func doubleValue(_ d: Decimal) -> Double {
-        NSDecimalNumber(decimal: d).doubleValue
-    }
-
     private var filteredExpenses: [Expense] {
         var list = Array(allExpenses)
         if let cat = selectedCategory {
@@ -174,16 +102,19 @@ struct SheetDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                SummaryCard(record: record, period: $period, selectedCategory: selectedCategory)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+                SummaryCard(
+                    record: record,
+                    period: $period,
+                    selectedCategory: selectedCategory,
+                    searchQuery: searchText.trimmingCharacters(in: .whitespaces)
+                )
+                .padding(.horizontal)
+                .padding(.top, 8)
 
                 if !allExpenses.isEmpty {
                     categoryPills
                         .padding(.horizontal)
                 }
-
-                searchResultSummary
 
                 if allExpenses.isEmpty {
                     emptyStateInitial
@@ -534,6 +465,9 @@ private struct SummaryCard: View {
     @ObservedObject var record: ExpenseSheet
     @Binding var period: SheetDetailView.Period
     let selectedCategory: ExpenseCategory?
+    /// 親 view (SheetDetailView) の searchText (trimmed)。空でなければ
+    /// 集計を検索ヒットに絞る + ヘッダーを「検索: \"...\" • N 件」表示に切替。
+    let searchQuery: String
     @ObservedObject private var fx = FXRatesService.shared
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -542,10 +476,16 @@ private struct SummaryCard: View {
     /// @FetchRequest を直接観測することで、expense 単位の変更でも合計表示が即時更新される。
     @FetchRequest private var expenses: FetchedResults<Expense>
 
-    init(record: ExpenseSheet, period: Binding<SheetDetailView.Period>, selectedCategory: ExpenseCategory? = nil) {
+    init(
+        record: ExpenseSheet,
+        period: Binding<SheetDetailView.Period>,
+        selectedCategory: ExpenseCategory? = nil,
+        searchQuery: String = ""
+    ) {
         self.record = record
         self._period = period
         self.selectedCategory = selectedCategory
+        self.searchQuery = searchQuery
         self._expenses = FetchRequest<Expense>(
             sortDescriptors: [NSSortDescriptor(keyPath: \Expense.date, ascending: false)],
             predicate: NSPredicate(format: "sheet == %@", record),
@@ -553,30 +493,47 @@ private struct SummaryCard: View {
         )
     }
 
+    private var isSearching: Bool { !searchQuery.isEmpty }
+
     private var code: String { record.resolvedDefaultCurrencyCode }
 
-    private func totals() -> (expense: Decimal, income: Decimal, missing: Set<String>) {
+    private func totals() -> (expense: Decimal, income: Decimal, missing: Set<String>, hitCount: Int) {
         let cal = Calendar.current
         let now = Date()
         let periodFilter: (Expense) -> Bool
-        switch period {
-        case .thisMonth:
-            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .month) }
-        case .lastMonth:
-            guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return (.zero, .zero, []) }
-            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: lm, toGranularity: .month) }
-        case .thisYear:
-            periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .year) }
-        case .all:
+        // 検索中は期間フィルタを外す (= シート全体から検索) — 検索結果が
+        // 当月外にあると 0 件と思われる UX を避ける。
+        if isSearching {
             periodFilter = { _ in true }
+        } else {
+            switch period {
+            case .thisMonth:
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .month) }
+            case .lastMonth:
+                guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return (.zero, .zero, [], 0) }
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: lm, toGranularity: .month) }
+            case .thisYear:
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .year) }
+            case .all:
+                periodFilter = { _ in true }
+            }
         }
         let categoryID = selectedCategory?.objectID
         let target = code
+        let q = searchQuery.lowercased()
         var expenseSum: Decimal = 0
         var incomeSum: Decimal = 0
         var missing: Set<String> = []
+        var hitCount = 0
         for e in expenses where periodFilter(e) {
             if let categoryID, e.category?.objectID != categoryID { continue }
+            if !q.isEmpty {
+                let matches = e.displayTitle.lowercased().contains(q)
+                    || e.displayPaidBy.lowercased().contains(q)
+                    || (e.note ?? "").lowercased().contains(q)
+                if !matches { continue }
+            }
+            hitCount += 1
             let from = e.resolvedCurrencyCode
             guard let converted = fx.convert(e.amountDecimal, from: from, to: target) else {
                 missing.insert(from)
@@ -587,7 +544,7 @@ private struct SummaryCard: View {
             case .income:  incomeSum += converted
             }
         }
-        return (expenseSum, incomeSum, missing)
+        return (expenseSum, incomeSum, missing, hitCount)
     }
 
     var body: some View {
@@ -614,7 +571,7 @@ private struct SummaryCard: View {
             }
 
             // 月予算の進捗バー (今月 + カテゴリ未選択時のみ)
-            if period == .thisMonth, selectedCategory == nil,
+            if !isSearching, period == .thisMonth, selectedCategory == nil,
                let budget = record.monthlyBudgetDecimal {
                 budgetProgress(spent: t.expense, budget: budget)
             }
@@ -648,10 +605,14 @@ private struct SummaryCard: View {
     /// 1 行に収まらなくなる AX では、pill 群と共有バッジを縦 2 段に分ける。
     @ViewBuilder
     private var summaryHeader: some View {
+        // 検索中は期間 pill の代わりに「検索: \"q\" • N 件」 pill を出す。
+        // (period は検索終了後に元の値で復活)
+        let leadingPill = AnyView(isSearching ? AnyView(searchPill) : AnyView(periodPill))
+
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
-                    periodPill
+                    leadingPill
                     if let cat = selectedCategory {
                         categoryPill(cat)
                     }
@@ -664,7 +625,7 @@ private struct SummaryCard: View {
             }
         } else {
             HStack {
-                periodPill
+                leadingPill
                 if let cat = selectedCategory {
                     categoryPill(cat)
                 }
@@ -672,6 +633,22 @@ private struct SummaryCard: View {
                 ShareStatusBadge(record: record)
             }
         }
+    }
+
+    private var searchPill: some View {
+        let count = totals().hitCount
+        return HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption.weight(.bold))
+            Text("\"\(searchQuery)\" • \(count) 件")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(record.tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(record.tint.opacity(0.18)))
     }
 
     private var periodPill: some View {
