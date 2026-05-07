@@ -150,6 +150,13 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("デバッグ") {
+                    NavigationLink("閉じる確認ダイアログ サンプル") {
+                        DismissConfirmDemoView()
+                            .navigationTitle("Dismiss Confirm Demo")
+                    }
+                }
+
                 Section {
                     Button(role: .destructive) {
                         showEraseConfirm = true
