@@ -48,7 +48,7 @@ private struct AttemptToDismissView: UIViewControllerRepresentable {
         // sheet の presentationController に届くタイミングは layout 後なので
         // 1 フレーム遅らせて delegate を差し込む。
         DispatchQueue.main.async { [weak vc] in
-            vc?.parent?.presentationController?.delegate = context.coordinator
+            attachDelegate(from: vc, to: context.coordinator)
         }
         return vc
     }
@@ -57,8 +57,34 @@ private struct AttemptToDismissView: UIViewControllerRepresentable {
         context.coordinator.host = self
         // VC が再 attach されるなど delegate が外れる可能性があるので毎回付け直す。
         DispatchQueue.main.async { [weak uiViewController] in
-            uiViewController?.parent?.presentationController?.delegate = context.coordinator
+            attachDelegate(from: uiViewController, to: context.coordinator)
         }
+    }
+
+    /// `vc` から親をたどって `presentingViewController != nil` の VC
+    /// (= 実際にシートとして提示されているホスト) を見つけ、その
+    /// presentationController.delegate に Coordinator を差し込む。
+    /// 親がまだ繋がっていない場合は次の runloop で再試行する。
+    private func attachDelegate(from vc: UIViewController?, to coordinator: Coordinator) {
+        guard let vc else { return }
+        if let host = sheetHost(from: vc) {
+            host.presentationController?.delegate = coordinator
+        } else {
+            DispatchQueue.main.async { [weak vc] in
+                guard let vc, let host = sheetHost(from: vc) else { return }
+                host.presentationController?.delegate = coordinator
+            }
+        }
+    }
+
+    /// 親チェーンを上がって、`presentingViewController != nil` の VC を返す。
+    private func sheetHost(from vc: UIViewController) -> UIViewController? {
+        var current: UIViewController? = vc
+        while let c = current {
+            if c.presentingViewController != nil { return c }
+            current = c.parent
+        }
+        return nil
     }
 
     final class Coordinator: NSObject, UIAdaptivePresentationControllerDelegate {
