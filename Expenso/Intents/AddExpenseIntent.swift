@@ -1,0 +1,123 @@
+//
+//  AddExpenseIntent.swift
+//  Expenso
+//
+//  AppIntents で支出を背景から追加するインテント。
+//  Shortcuts / Siri / Spotlight / Action Button から呼ばれ、UI を開かずに
+//  Core Data に Expense を作成し CloudKit に同期させる。
+//
+
+import AppIntents
+import CoreData
+import Foundation
+
+struct AddExpenseIntent: AppIntent {
+    static var title: LocalizedStringResource = "支出を追加"
+    static var description = IntentDescription(
+        "Expenso のシートに支出を 1 件記録します。今日の日付・支払者は自分が使われます。"
+    )
+    /// Shortcuts 経由で実行された時の振る舞い:
+    /// - openAppWhenRun = false → アプリは前面に出ない (= 完全バックグラウンド実行)
+    static var openAppWhenRun: Bool = false
+
+    @Parameter(title: "シート", description: "支出を記録するシート")
+    var sheet: ExpenseSheetEntity
+
+    @Parameter(title: "タイトル", description: "支出の内容 (例: ランチ)")
+    var title: String
+
+    @Parameter(
+        title: "金額",
+        description: "支払った金額。シートの既定通貨で記録されます。",
+        controlStyle: .field
+    )
+    var amount: Double
+
+    @Parameter(title: "メモ (任意)", default: "")
+    var note: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("\(\.$sheet) に \(\.$title) (\(\.$amount)) を追加") {
+            \.$note
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let pc = PersistenceController.shared
+        let ctx = pc.container.viewContext
+
+        // Entity の id (= objectID URI) から実体を引く
+        guard let url = URL(string: sheet.id),
+              let oid = pc.container.persistentStoreCoordinator
+                .managedObjectID(forURIRepresentation: url),
+              let coreSheet = try? ctx.existingObject(with: oid) as? ExpenseSheet
+        else {
+            throw AppIntentError.sheetNotFound
+        }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            throw AppIntentError.emptyTitle
+        }
+        guard amount > 0 else {
+            throw AppIntentError.invalidAmount
+        }
+
+        let expense = Expense(context: ctx)
+        let sheetStore = coreSheet.objectID.persistentStore
+        if let store = sheetStore {
+            ctx.assign(expense, to: store)
+        }
+
+        expense.title = trimmedTitle
+        expense.amount = NSDecimalNumber(decimal: Decimal(amount))
+        expense.kindRaw = TransactionKind.expense.rawValue
+        expense.currencyCode = coreSheet.resolvedDefaultCurrencyCode
+        expense.date = .now
+        expense.note = note
+        expense.createdAt = .now
+
+        // 支払者: 自分 (UserProfileStore のキャッシュから埋める)
+        let profile = UserProfileStore.shared
+        if let rn = profile.userRecordName, !rn.isEmpty {
+            expense.payerProfileID = rn
+            expense.paidBy = profile.resolvedDisplayName
+        }
+        if let memberID = profile.selfMemberID {
+            expense.payerMemberID = memberID
+        }
+
+        expense.sheet = coreSheet
+
+        // 自分の ParticipantProfile をシートに ensure (まだ無ければ作成)
+        profile.ensureProfile(in: coreSheet, ctx: ctx)
+
+        pc.save()
+
+        let amountDisplay = CurrencyCatalog.format(
+            Decimal(amount),
+            code: coreSheet.resolvedDefaultCurrencyCode
+        )
+        return .result(
+            dialog: IntentDialog(
+                full: "「\(coreSheet.displayName)」に「\(trimmedTitle)」(\(amountDisplay)) を追加しました",
+                supporting: "支出を追加しました"
+            )
+        )
+    }
+}
+
+enum AppIntentError: Error, CustomLocalizedStringResourceConvertible {
+    case sheetNotFound
+    case emptyTitle
+    case invalidAmount
+
+    var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .sheetNotFound: "シートが見つかりませんでした。"
+        case .emptyTitle:    "タイトルが空です。"
+        case .invalidAmount: "金額は 0 より大きい値を指定してください。"
+        }
+    }
+}
