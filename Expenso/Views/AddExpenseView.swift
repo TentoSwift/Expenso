@@ -516,39 +516,6 @@ struct AddExpenseView: View {
 
                 if case .create = mode {
                     Section {
-                        HStack(spacing: 12) {
-                            if ReceiptCameraScanner.isAvailable {
-                                ScanEntryButton(
-                                    title: "カメラ",
-                                    subtitle: "撮影してスキャン",
-                                    systemImage: "camera.viewfinder",
-                                    tint: .blue
-                                ) {
-                                    showCameraScanner = true
-                                }
-                            }
-                            ScanEntryButton(
-                                title: "写真",
-                                subtitle: "ライブラリから",
-                                systemImage: "photo.on.rectangle",
-                                tint: .purple
-                            ) {
-                                showPhotoScanner = true
-                            }
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    } header: {
-                        (Text(Image(systemName: "apple.intelligence")) + Text(" レシートから自動入力"))
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                    } footer: {
-                        Text("店名・金額・日付を読み取って自動で入力します。読み取り後に内容を確認・修正してください。")
-                            .font(.caption2)
-                    }
-
-                    Section {
                         Button {
                             showingTemplatePicker = true
                         } label: {
@@ -699,6 +666,26 @@ struct AddExpenseView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { dismiss() }
+                }
+                if case .create = mode {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            if ReceiptCameraScanner.isAvailable {
+                                Button {
+                                    showCameraScanner = true
+                                } label: {
+                                    Label("カメラで撮影", systemImage: "camera.viewfinder")
+                                }
+                            }
+                            Button {
+                                showPhotoScanner = true
+                            } label: {
+                                Label("写真ライブラリから", systemImage: "photo.on.rectangle")
+                            }
+                        } label: {
+                            Label("レシートから読み込み", systemImage: "text.viewfinder")
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { trySave() }
@@ -1149,31 +1136,3 @@ struct AddExpenseView: View {
     }
 }
 
-private struct ScanEntryButton: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let tint: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(height: 30)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 8)
-        }
-        .buttonStyle(.glass)
-    }
-}
