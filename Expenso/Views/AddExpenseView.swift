@@ -670,6 +670,7 @@ struct AddExpenseView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .tint(.primary)
                 }
                 if case .create = mode {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -689,6 +690,7 @@ struct AddExpenseView: View {
                         } label: {
                             Image(systemName: "text.viewfinder")
                         }
+                        .tint(.primary)
                     }
                     ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
@@ -699,6 +701,7 @@ struct AddExpenseView: View {
                         Image(systemName: "checkmark")
                     }
                     .disabled(!canSave)
+                    .tint(contextSheet?.tint ?? .accentColor)
                 }
             }
             .confirmationDialog(
@@ -750,7 +753,6 @@ struct AddExpenseView: View {
                 )
             }
         }
-        .tint(contextSheet?.tint ?? .accentColor)
     }
 
     /// OCR で取れた候補を、ユーザーがまだ手で入れていないフィールドだけに適用する。
