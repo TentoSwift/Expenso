@@ -813,26 +813,6 @@ struct AddExpenseView: View {
                         Image(systemName: "xmark")
                     }
                     .tint(.primary)
-                    .confirmationDialog(
-                        "変更を破棄しますか?",
-                        isPresented: $showDiscardConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("変更を破棄", role: .destructive) {
-                            if let rule = pendingEditRuleAction {
-                                onEditRule?(rule)
-                                pendingEditRuleAction = nil
-                            }
-                            dismiss()
-                        }
-                        Button("編集を続ける", role: .cancel) {
-                            // 「定期項目を編集」由来でダイアログを出していた場合、
-                            // キャンセルされたので Rule ハンドオフも放棄する。
-                            pendingEditRuleAction = nil
-                        }
-                    } message: {
-                        Text("入力中の内容は保存されません。")
-                    }
                 }
                 if case .create = mode {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -931,6 +911,30 @@ struct AddExpenseView: View {
             shouldAllowDismiss: { !hasUnsavedChanges },
             onAttempt: { showDiscardConfirm = true }
         )
+        // ダイアログも root に置く: CategoryPickerView や PayerPickerView を
+        // push 中にスワイプ / xmark / 「定期項目を編集」が発火しても、
+        // どの nav 階層に居ても確実に表示されるようにする。
+        // (ツールバーボタンに付けると、push されて隠れている時に出ない)
+        .confirmationDialog(
+            "変更を破棄しますか?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("変更を破棄", role: .destructive) {
+                if let rule = pendingEditRuleAction {
+                    onEditRule?(rule)
+                    pendingEditRuleAction = nil
+                }
+                dismiss()
+            }
+            Button("編集を続ける", role: .cancel) {
+                // 「定期項目を編集」由来でダイアログを出していた場合、
+                // キャンセルされたので Rule ハンドオフも放棄する。
+                pendingEditRuleAction = nil
+            }
+        } message: {
+            Text("入力中の内容は保存されません。")
+        }
     }
 
     /// OCR で取れた候補を、ユーザーがまだ手で入れていないフィールドだけに適用する。
