@@ -775,20 +775,22 @@ private struct ExpenseRowView: View {
     }
 
     var body: some View {
-        // Dynamic Type が AX サイズに上がるとアイコン+タイトル+金額の 3 段が
-        // 横一列に収まらず崩れる。AX 以上では 2 行レイアウトに切り替える:
-        //   行 1: [アイコン] [タイトル + サブタイトル]
-        //   行 2:                                 [金額 (右寄せ)]
+        // Dynamic Type が AX サイズに上がると 1 列に詰まったレイアウトが破綻する。
+        // Apple Music の AX 表示にならって、ヘッダー行 (アイコン+金額) →
+        // タイトル (全幅で wrap) → サブタイトル の 3 段に展開する。
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top) {
                     categoryIconWithPayer
-                    titleAndSubtitle
-                    Spacer()
-                }
-                HStack {
-                    Spacer()
+                    Spacer(minLength: 12)
                     amountAndCurrency
+                }
+                Text(expense.displayTitle.isEmpty ? expense.categoryDisplayName : expense.displayTitle)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showSubtitle {
+                    accessibilitySubtitle
                 }
             }
         } else {
@@ -799,6 +801,25 @@ private struct ExpenseRowView: View {
                 amountAndCurrency
             }
         }
+    }
+
+    /// AX 用のサブタイトル: 払った人 (色付き) と note を改行ありで縦に並べる。
+    /// (通常レイアウトの 1 行 HStack と違い、長い note を切らない)
+    @ViewBuilder
+    private var accessibilitySubtitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let displayName = expense.displayPaidBy
+            if !displayName.isEmpty {
+                Text(displayName)
+                    .foregroundStyle(expense.payerTint)
+            }
+            if let note = expense.note, !note.isEmpty {
+                Text(note)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var showSubtitle: Bool {
