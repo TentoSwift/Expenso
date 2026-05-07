@@ -103,8 +103,19 @@ struct AddExpenseView: View {
         case all        // ルール + 過去に生成済みの全支出も更新
     }
 
-    init(record: ExpenseSheet) { self.mode = .create(record: record) }
-    init(expense: Expense) { self.mode = .edit(expense: expense) }
+    /// 「定期項目を編集」を押した時に呼ばれるコールバック。
+    /// シートを閉じて、親 (= SheetDetailView) 側で定期項目 view へ遷移する経路を提供する。
+    let onEditRule: ((RecurringRule) -> Void)?
+
+    init(record: ExpenseSheet) {
+        self.mode = .create(record: record)
+        self.onEditRule = nil
+    }
+
+    init(expense: Expense, onEditRule: ((RecurringRule) -> Void)? = nil) {
+        self.mode = .edit(expense: expense)
+        self.onEditRule = onEditRule
+    }
 
     private var amountDecimal: Decimal? {
         guard !amountText.isEmpty else { return nil }
@@ -396,12 +407,17 @@ struct AddExpenseView: View {
         if case .edit(let expense) = mode, let rule = expense.relatedRule {
             // 既に Rule から生成された支出は、ここで Toggle / Stepper を編集させると
             // 「この項目だけ」と「Rule 全体」が混ざって混乱しやすい。
-            // → Rule の編集画面に飛ばし、頻度・間隔・終了日はそこで触ってもらう。
+            // → 編集シートを閉じて、SheetDetailView 側で「定期項目」一覧 →
+            //   その Rule の編集 view を直接開く動線にする。
             Section {
-                NavigationLink {
-                    EditRecurringRuleView(mode: .edit(rule: rule))
+                Button {
+                    onEditRule?(rule)
+                    dismiss()
                 } label: {
-                    Label {
+                    HStack(spacing: 12) {
+                        Image(systemName: "repeat")
+                            .frame(width: 22)
+                            .foregroundStyle(.tint)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("定期項目を編集")
                                 .foregroundStyle(.primary)
@@ -409,10 +425,14 @@ struct AddExpenseView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                    } icon: {
-                        Image(systemName: "repeat")
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
             } header: {
                 Text("繰り返し")
             } footer: {

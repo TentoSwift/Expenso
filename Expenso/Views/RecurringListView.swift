@@ -14,9 +14,14 @@ struct RecurringListView: View {
 
     @State private var editingRule: RecurringRule?
     @State private var showingNew = false
+    /// 親 view から「この Rule を表示直後に開いて」と指定されるとここに入り、
+    /// `onAppear` で `editingRule` にセットしてシートを開く。
+    private let autoEditRule: RecurringRule?
+    @State private var didAutoOpen = false
 
-    init(record: ExpenseSheet) {
+    init(record: ExpenseSheet, autoEditRule: RecurringRule? = nil) {
         self.record = record
+        self.autoEditRule = autoEditRule
         _rules = FetchRequest<RecurringRule>(
             sortDescriptors: [NSSortDescriptor(keyPath: \RecurringRule.createdAt, ascending: true)],
             predicate: NSPredicate(format: "sheet == %@", record),
@@ -70,6 +75,15 @@ struct RecurringListView: View {
         }
         .sheet(isPresented: $showingNew) {
             EditRecurringRuleView(mode: .create(record: record))
+        }
+        .onAppear {
+            // AddExpenseView から飛んできた直後など、開いた瞬間に
+            // 特定の Rule の編集シートを自動的に開く。
+            guard !didAutoOpen, let target = autoEditRule else { return }
+            didAutoOpen = true
+            DispatchQueue.main.async {
+                editingRule = target
+            }
         }
     }
 

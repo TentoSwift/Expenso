@@ -48,6 +48,11 @@ struct SheetDetailView: View {
     @State private var demoOpenTemplates: Bool = false
     @State private var demoOpenStats: Bool = false
     @State private var demoOpenChat: Bool = false
+    /// AddExpenseView から「定期項目を編集」が押された時にセットされる。
+    /// シートが閉じきった後で `recurringListAutoEdit` に流して RecurringListView へ push する。
+    @State private var pendingEditRule: RecurringRule?
+    @State private var showRecurringListAutoEdit: Bool = false
+    @State private var recurringListAutoEdit: RecurringRule?
     @AppStorage("expenseSortOption") private var sortOptionRaw: String = SortOption.dateDesc.rawValue
 
     /// シート配下の Expense を直接観測。`record.expenses` 経由だと子の attribute 変更
@@ -207,8 +212,18 @@ struct SheetDetailView: View {
         .sheet(isPresented: $showingShare) {
             CloudSharingView(record: record)
         }
-        .sheet(item: $editingExpense) { expense in
-            AddExpenseView(expense: expense)
+        .sheet(item: $editingExpense, onDismiss: {
+            // 「定期項目を編集」経由で閉じた時だけ、RecurringListView に
+            // 遷移して該当 Rule の編集シートを自動で開く。
+            if let rule = pendingEditRule {
+                pendingEditRule = nil
+                recurringListAutoEdit = rule
+                showRecurringListAutoEdit = true
+            }
+        }) { expense in
+            AddExpenseView(expense: expense, onEditRule: { rule in
+                pendingEditRule = rule
+            })
         }
         .sheet(item: $editingRule) { rule in
             EditRecurringRuleView(mode: .edit(rule: rule))
@@ -233,6 +248,9 @@ struct SheetDetailView: View {
                 demoOpenChat = true
             default: break
             }
+        }
+        .navigationDestination(isPresented: $showRecurringListAutoEdit) {
+            RecurringListView(record: record, autoEditRule: recurringListAutoEdit)
         }
         .navigationDestination(isPresented: $demoOpenCalendar) {
             SheetCalendarView(record: record)
