@@ -519,21 +519,6 @@ struct AddExpenseView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if case .create = mode {
-                    Section {
-                        Button {
-                            showingTemplatePicker = true
-                        } label: {
-                            Label("テンプレから入力", systemImage: "doc.on.doc")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    } footer: {
-                        Text("よく使う支出をテンプレに保存しておくと、ワンタップで内容が入力されます。")
-                            .font(.caption2)
-                    }
-                }
 
                 Section("内容") {
                     TextField(kind == .expense ? "タイトル (例: スーパー)" : "タイトル (例: 給料)", text: $title)
@@ -695,6 +680,14 @@ struct AddExpenseView: View {
                             }
                         } label: {
                             Image(systemName: "text.viewfinder")
+                        }
+                        .tint(.primary)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingTemplatePicker = true
+                        } label: {
+                            Image(systemName: "doc.on.doc")
                         }
                         .tint(.primary)
                     }
