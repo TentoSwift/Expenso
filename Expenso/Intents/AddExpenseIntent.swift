@@ -162,34 +162,80 @@ struct AddExpenseIntent: AppIntent {
             }
         }
 
-        // 2) AI 推測 + 確認ダイアログ
-        guard CategoryAISuggestor.isAvailable else { return nil }
+        // 2) AI 推測 + 3 択 (AI 提案 / 自分で選ぶ / 未分類のまま) ダイアログ
         let names = kindCats.map { $0.displayName }
         guard !names.isEmpty else { return nil }
-        let suggestedName = await CategoryAISuggestor.suggest(
+
+        // AI 提案 (利用可能な時のみ)
+        var suggestedCat: ExpenseCategory? = nil
+        if CategoryAISuggestor.isAvailable,
+           let suggestedName = await CategoryAISuggestor.suggest(
             title: title,
             kind: .expense,
             categories: names
-        )
-        guard let suggestedName,
-              let suggestedCat = kindCats.first(where: { $0.displayName == suggestedName })
-        else { return nil }
+           ) {
+            suggestedCat = kindCats.first(where: { $0.displayName == suggestedName })
+        }
 
-        // ユーザーに「この提案を使うか?」を確認 (Yes/No ダイアログ)
-        let suggestedEntity = ExpenseCategoryEntity.from(suggestedCat)
-        do {
-            let accepted = try await $category.requestConfirmation(
-                for: suggestedEntity,
-                dialog: IntentDialog(
-                    "「\(title)」のカテゴリは「\(suggestedCat.displayName)」で良いですか? (AI が推測しました)"
+        // 選択肢を組み立て:
+        //   - AI 提案 (subtitle "✨ AI 推奨") ※あれば先頭
+        //   - シート内のその他カテゴリ (sortOrder 順)
+        //   - "未分類のまま" sentinel (id = skipCategoryID)
+        var options: [ExpenseCategoryEntity] = []
+        if let suggestedCat {
+            options.append(ExpenseCategoryEntity(
+                id: suggestedCat.objectID.uriRepresentation().absoluteString,
+                name: suggestedCat.displayName,
+                sheetName: "✨ AI 推奨",
+                kindRaw: suggestedCat.kindRaw ?? TransactionKind.expense.rawValue
+            ))
+        }
+        let sortedOthers = kindCats
+            .filter { $0.objectID != suggestedCat?.objectID }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        for cat in sortedOthers {
+            options.append(ExpenseCategoryEntity.from(cat))
+        }
+        options.append(ExpenseCategoryEntity(
+            id: Self.skipCategoryID,
+            name: "未分類のまま",
+            sheetName: "(カテゴリなしで保存)",
+            kindRaw: ""
+        ))
+
+        let dialog: IntentDialog = {
+            if let suggestedCat {
+                return IntentDialog(
+                    "「\(title)」のカテゴリを選んでください。AI 提案: 「\(suggestedCat.displayName)」"
                 )
+            }
+            return IntentDialog("「\(title)」のカテゴリを選んでください。")
+        }()
+
+        do {
+            let chosen = try await $category.requestDisambiguation(
+                among: options,
+                dialog: dialog
             )
-            return accepted ? suggestedCat : nil
+            // Skip sentinel → 未分類
+            if chosen.id == Self.skipCategoryID { return nil }
+            // 選ばれた entity の objectID から ExpenseCategory を解決
+            if let url = URL(string: chosen.id),
+               let oid = ctx.persistentStoreCoordinator?
+                .managedObjectID(forURIRepresentation: url),
+               let cat = try? ctx.existingObject(with: oid) as? ExpenseCategory {
+                return cat
+            }
+            // フォールバック: 名前一致でシート内検索
+            return kindCats.first(where: { $0.displayName == chosen.name })
         } catch {
-            // ユーザーがキャンセル → 未分類で保存
+            // ユーザーがキャンセル / エラー → 未分類で保存
             return nil
         }
     }
+
+    /// 「未分類のまま」を表す sentinel id
+    static let skipCategoryID = "__expenso_skip_category__"
 }
 
 enum AppIntentError: Error, CustomLocalizedStringResourceConvertible {
