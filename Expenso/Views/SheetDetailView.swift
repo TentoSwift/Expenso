@@ -95,43 +95,50 @@ struct SheetDetailView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(spacing: 16) {
-                    SummaryCard(record: record, period: $period, selectedCategory: selectedCategory)
+        ScrollView {
+            VStack(spacing: 16) {
+                SummaryCard(record: record, period: $period, selectedCategory: selectedCategory)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
+                if !allExpenses.isEmpty {
+                    categoryPills
                         .padding(.horizontal)
-                        .padding(.top, 8)
-
-                    if !allExpenses.isEmpty {
-                        categoryPills
-                            .padding(.horizontal)
-                    }
-
-                    if allExpenses.isEmpty {
-                        emptyStateInitial
-                            .padding(.top, 40)
-                    } else if filteredExpenses.isEmpty {
-                        emptyStateFiltered
-                            .padding(.top, 40)
-                    } else {
-                        sectionedList
-                            .padding(.horizontal)
-                    }
                 }
-                .padding(.bottom, 100) // floating bar の余白
-            }
 
-            floatingBottomBar
+                if allExpenses.isEmpty {
+                    emptyStateInitial
+                        .padding(.top, 40)
+                } else if filteredExpenses.isEmpty {
+                    emptyStateFiltered
+                        .padding(.top, 40)
+                } else {
+                    sectionedList
+                        .padding(.horizontal)
+                }
+            }
+            .padding(.bottom, 16)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle(record.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        // iOS 26: 検索バーを 1 個のバーボタンとして畳み込み、タップで展開する
+        // (UIKit の `UINavigationItem.searchBarPlacementBarButtonItem` 相当)
+        .searchable(text: $searchText, prompt: Text("支出を検索"))
+        .searchToolbarBehavior(.minimize)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingShare = true
                 } label: {
                     Image(systemName: record.isOwnedByCurrentUser ? "person.crop.circle.badge.plus" : "person.2.fill")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingAddExpense = true
+                } label: {
+                    Image(systemName: "plus")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -343,43 +350,6 @@ struct SheetDetailView: View {
                 }
             }
         }
-    }
-
-    private var floatingBottomBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("検索", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(Capsule().fill(.regularMaterial))
-
-            Button {
-                showingAddExpense = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(record.tint.gradient))
-                    .shadow(color: record.tint.opacity(0.4), radius: 8, y: 3)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     // MARK: - Helpers
