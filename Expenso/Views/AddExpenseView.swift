@@ -699,27 +699,7 @@ struct AddExpenseView: View {
                 suggestionSection
                 aiCategorySuggestionSection
 
-                Section("カテゴリ") {
-                    if let sheet = contextSheet {
-                        NavigationLink {
-                            CategoryPickerView(selected: $selectedCategory, record: sheet, kind: kind)
-                                .modifier(discardDialogModifier)
-                        } label: {
-                            HStack {
-                                Text("カテゴリ")
-                                Spacer()
-                                if let cat = selectedCategory {
-                                    CategoryIconView(category: cat, size: 24)
-                                    Text(cat.displayName)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text("未選択")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
+                categorySection
 
                 Section("日時") {
                     DatePicker("日付", selection: $date, displayedComponents: [.date])
@@ -731,39 +711,16 @@ struct AddExpenseView: View {
                     }
                 }
 
-                Section(kind.partyLabel) {
-                    NavigationLink {
-                        MemberPickerView(
-                            selected: $selectedPayer,
-                            record: contextSheet,
-                            kind: kind,
-                            fallbackPaidBy: payerFallbackName,
-                            fallbackProfileID: payerFallbackProfileID
-                        )
-                        .modifier(discardDialogModifier)
-                    } label: {
-                        HStack {
-                            Text(kind.partyLabel)
-                            Spacer()
-                            payerPreview
-                        }
-                    }
-                }
+                payerSection
 
                 if kind == .expense, let sheet = contextSheet {
                     Section {
                         NavigationLink {
-                            BeneficiaryPickerView(selected: $selectedBeneficiaries, record: sheet)
-                                .modifier(discardDialogModifier)
-                        } label: {
-                            HStack {
-                                Text("受益者")
-                                Spacer()
-                                Text(beneficiarySummary(in: sheet))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                            DiscardGuardedBack(modifier: discardDialogModifier) {
+                                BeneficiaryPickerView(selected: $selectedBeneficiaries, record: sheet)
                             }
+                        } label: {
+                            beneficiaryLabel(sheet: sheet)
                         }
                     } footer: {
                         Text("精算する際にこの支出を誰の負担として割るかを指定します。未指定の場合はシート全員で均等割り。")
@@ -917,11 +874,72 @@ struct AddExpenseView: View {
         )
     }
 
+    @ViewBuilder
+    private var categorySection: some View {
+        Section("カテゴリ") {
+            if let sheet = contextSheet {
+                NavigationLink {
+                    DiscardGuardedBack(modifier: discardDialogModifier) {
+                        CategoryPickerView(selected: $selectedCategory, record: sheet, kind: kind)
+                    }
+                } label: {
+                    HStack {
+                        Text("カテゴリ")
+                        Spacer()
+                        if let cat = selectedCategory {
+                            CategoryIconView(category: cat, size: 24)
+                            Text(cat.displayName)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("未選択")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var payerSection: some View {
+        Section(kind.partyLabel) {
+            NavigationLink {
+                DiscardGuardedBack(modifier: discardDialogModifier) {
+                    MemberPickerView(
+                        selected: $selectedPayer,
+                        record: contextSheet,
+                        kind: kind,
+                        fallbackPaidBy: payerFallbackName,
+                        fallbackProfileID: payerFallbackProfileID
+                    )
+                }
+            } label: {
+                HStack {
+                    Text(kind.partyLabel)
+                    Spacer()
+                    payerPreview
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func beneficiaryLabel(sheet: ExpenseSheet) -> some View {
+        HStack {
+            Text("受益者")
+            Spacer()
+            Text(beneficiarySummary(in: sheet))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
     /// xmark / 各サブ view に共通で当てる「変更を破棄しますか?」ダイアログ。
     /// 同じ `$showDiscardConfirm` バインディングなので、その時点で
     /// 表示中の view (= xmark を含む AddExpenseView 本体 or push 済みサブ view)
     /// に dialog アンカーがあれば、そこからシートが開く。
-    private var discardDialogModifier: some ViewModifier {
+    private var discardDialogModifier: DiscardConfirmModifier {
         DiscardConfirmModifier(
             isPresented: $showDiscardConfirm,
             onDiscard: {
@@ -1339,6 +1357,36 @@ struct AddExpenseView: View {
         rule.startDate = Calendar.current.startOfDay(for: startDate)
         rule.endDate = hasEndDate ? Calendar.current.startOfDay(for: endDate) : nil
         return rule
+    }
+}
+
+/// 各サブ view (CategoryPickerView 等) を NavigationLink で push する時に
+/// この wrapper でくるんで、自前の「戻るボタン」を leading に置き、その
+/// ボタンに `DiscardConfirmModifier` を当てる。
+/// 自動の back chevron は `.navigationBarBackButtonHidden(true)` で隠す。
+/// これで `showDiscardConfirm` が立った時、push 中のサブ view にも
+/// 確実な anchor (= 戻るボタン) を持つダイアログが出せる。
+private struct DiscardGuardedBack<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    let modifier: DiscardConfirmModifier
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.backward")
+                            Text("戻る")
+                        }
+                    }
+                    .modifier(modifier)
+                }
+            }
     }
 }
 
