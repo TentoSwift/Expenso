@@ -214,31 +214,102 @@ struct AddExpenseView: View {
                         aiCategorySuggestion = nil
                         Haptics.success()
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "apple.intelligence")
-                                .foregroundStyle(Color.purple)
-                            VStack(alignment: .leading, spacing: 2) {
-                                (Text(Image(systemName: "apple.intelligence")) + Text(" 提案"))
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                HStack(spacing: 6) {
-                                    CategoryIconView(category: cat, size: 22)
-                                    Text(cat.displayName)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                }
-                            }
-                            Spacer()
-                            Text("適用")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Capsule().fill(Color.accentColor.opacity(0.18)))
-                                .foregroundStyle(Color.accentColor)
-                        }
+                        aiCategorySuggestionLabel(for: cat)
                     }
                     .buttonStyle(.plain)
                 }
+            }
+        }
+    }
+
+    /// 過去履歴サジェストバナーの中身。AX では適用 pill を下段に。
+    @ViewBuilder
+    private func historySuggestionLabel(for s: TitleSuggestion) -> some View {
+        let header = Text("過去の入力から候補")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        let summary = Text(s.summary(currency: currencyCode))
+            .font(.subheadline)
+            .foregroundStyle(.primary)
+            // AX では full-width で wrap させたいので、line limit を外す。
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            .truncationMode(.tail)
+        let applyPill = Text("適用")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+            .foregroundStyle(Color.accentColor)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(Color.accentColor)
+                    header
+                    Spacer()
+                }
+                summary
+                HStack { Spacer(); applyPill }
+            }
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    header
+                    summary
+                }
+                Spacer()
+                applyPill
+            }
+        }
+    }
+
+    /// AI 提案バナーの中身。AX サイズでは「適用」pill を下段にまわして
+    /// テキストが詰まらないようにする。
+    @ViewBuilder
+    private func aiCategorySuggestionLabel(for cat: ExpenseCategory) -> some View {
+        let header = (Text(Image(systemName: "apple.intelligence")) + Text(" 提案"))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        let nameRow = HStack(spacing: 6) {
+            CategoryIconView(category: cat, size: 22)
+            Text(cat.displayName)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+        }
+        let applyPill = Text("適用")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+            .foregroundStyle(Color.accentColor)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "apple.intelligence")
+                        .foregroundStyle(Color.purple)
+                    header
+                    Spacer()
+                }
+                nameRow
+                HStack {
+                    Spacer()
+                    applyPill
+                }
+            }
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: "apple.intelligence")
+                    .foregroundStyle(Color.purple)
+                VStack(alignment: .leading, spacing: 2) {
+                    header
+                    nameRow
+                }
+                Spacer()
+                applyPill
             }
         }
     }
@@ -250,27 +321,7 @@ struct AddExpenseView: View {
                 Button {
                     applySuggestion(s)
                 } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(Color.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("過去の入力から候補")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(s.summary(currency: currencyCode))
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        Spacer()
-                        Text("適用")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.18)))
-                            .foregroundStyle(Color.accentColor)
-                    }
+                    historySuggestionLabel(for: s)
                 }
                 .buttonStyle(.plain)
             }
@@ -671,26 +722,20 @@ struct AddExpenseView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("種別", selection: $kind) {
-                        ForEach(TransactionKind.allCases) { k in
-                            Label(k.label, systemImage: k.symbol).tag(k)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: kind) { _, newKind in
-                        // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
-                        // (編集ロード時に State が `.expense` 既定値 → `.income` に変わって onChange が
-                        //  発火するレースで、復元したばかりのカテゴリが上書きされるのを防ぐ)
-                        if let cur = selectedCategory, cur.kind == newKind {
+                    // segmented は AX サイズで label が切れて崩れるので、AX では
+                    // 通常の (Label 付きの) menu スタイルに切り替える。
+                    kindPicker
+                        .onChange(of: kind) { _, newKind in
+                            // 既存の selectedCategory が新 kind に合っていればそのまま保つ。
+                            if let cur = selectedCategory, cur.kind == newKind {
+                                recomputeTitleSuggestion()
+                                return
+                            }
+                            // 種別が変わって既存カテゴリが合わない時は未分類に戻す
+                            selectedCategory = nil
                             recomputeTitleSuggestion()
-                            return
                         }
-                        // 種別が変わって既存カテゴリが合わない時は未分類に戻す
-                        // (= 自動で先頭カテゴリにリセットせず、ユーザー / AI 提案が選ぶ)
-                        selectedCategory = nil
-                        recomputeTitleSuggestion()
-                    }
-                    .listRowBackground(Color.clear)
+                        .listRowBackground(dynamicTypeSize.isAccessibilitySize ? nil : Color.clear)
                 }
 
 
@@ -728,11 +773,21 @@ struct AddExpenseView: View {
 
                 Section("日時") {
                     DatePicker("日付", selection: $date, displayedComponents: [.date])
-                    HStack(spacing: 8) {
-                        datePresetButton("今日", offset: 0)
-                        datePresetButton("昨日", offset: -1)
-                        datePresetButton("一昨日", offset: -2)
-                        Spacer()
+                    if dynamicTypeSize.isAccessibilitySize {
+                        // AX では 1 行に 3 個入らないので、縦並びにして
+                        // chips を full-width にする。
+                        VStack(alignment: .leading, spacing: 8) {
+                            datePresetButton("今日", offset: 0)
+                            datePresetButton("昨日", offset: -1)
+                            datePresetButton("一昨日", offset: -2)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            datePresetButton("今日", offset: 0)
+                            datePresetButton("昨日", offset: -1)
+                            datePresetButton("一昨日", offset: -2)
+                            Spacer()
+                        }
                     }
                 }
 
@@ -899,6 +954,26 @@ struct AddExpenseView: View {
         )
     }
 
+    /// 種別 Picker。AX サイズでは segmented が切れて崩れるので menu に切り替える。
+    @ViewBuilder
+    private var kindPicker: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            Picker("種別", selection: $kind) {
+                ForEach(TransactionKind.allCases) { k in
+                    Label(k.label, systemImage: k.symbol).tag(k)
+                }
+            }
+            .pickerStyle(.menu)
+        } else {
+            Picker("種別", selection: $kind) {
+                ForEach(TransactionKind.allCases) { k in
+                    Label(k.label, systemImage: k.symbol).tag(k)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
     @ViewBuilder
     private var categorySection: some View {
         Section("カテゴリ") {
@@ -908,13 +983,13 @@ struct AddExpenseView: View {
                         CategoryPickerView(selected: $selectedCategory, record: sheet, kind: kind)
                     }
                 } label: {
-                    HStack {
-                        Text("カテゴリ")
-                        Spacer()
+                    LabeledContent("カテゴリ") {
                         if let cat = selectedCategory {
-                            CategoryIconView(category: cat, size: 24)
-                            Text(cat.displayName)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                CategoryIconView(category: cat, size: 24)
+                                Text(cat.displayName)
+                                    .foregroundStyle(.secondary)
+                            }
                         } else {
                             Text("未選択")
                                 .foregroundStyle(.secondary)
@@ -939,9 +1014,7 @@ struct AddExpenseView: View {
                     )
                 }
             } label: {
-                HStack {
-                    Text(kind.partyLabel)
-                    Spacer()
+                LabeledContent(kind.partyLabel) {
                     payerPreview
                 }
             }
@@ -950,12 +1023,12 @@ struct AddExpenseView: View {
 
     @ViewBuilder
     private func beneficiaryLabel(sheet: ExpenseSheet) -> some View {
-        HStack {
-            Text("受益者")
-            Spacer()
+        LabeledContent("受益者") {
             Text(beneficiarySummary(in: sheet))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                // AX サイズでは LabeledContent が縦積みになるので、
+                // 切り詰めを許して横で済ませるのは normal サイズだけにする。
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .truncationMode(.tail)
         }
     }
