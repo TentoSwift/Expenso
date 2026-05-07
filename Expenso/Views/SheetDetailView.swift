@@ -521,45 +521,7 @@ private struct SummaryCard: View {
         let net = t.income - t.expense
         let tint = record.tint
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Menu {
-                    ForEach(SheetDetailView.Period.allCases) { p in
-                        Button {
-                            period = p
-                        } label: {
-                            HStack {
-                                Text(p.label)
-                                if p == period { Image(systemName: "checkmark") }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(period.label)
-                            .font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(record.tint)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(record.tint.opacity(0.18)))
-                }
-                if let cat = selectedCategory {
-                    HStack(spacing: 4) {
-                        Image(systemName: cat.displaySymbol)
-                            .font(.caption2)
-                        Text(cat.displayName)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(cat.tint)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(cat.tint.opacity(0.18)))
-                }
-                Spacer()
-                ShareStatusBadge(record: record)
-            }
+            summaryHeader
 
             VStack(spacing: 4) {
                 Text(CurrencyCatalog.format(net, code: code))
@@ -595,6 +557,75 @@ private struct SummaryCard: View {
             RoundedRectangle(cornerRadius: 18)
                 .fill(tint.opacity(0.18))
         )
+    }
+
+    /// 集計カードのヘッダー (期間 pill + カテゴリ pill + 共有バッジ)。
+    /// 1 行に収まらなくなる AX では、pill 群と共有バッジを縦 2 段に分ける。
+    @ViewBuilder
+    private var summaryHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    periodPill
+                    if let cat = selectedCategory {
+                        categoryPill(cat)
+                    }
+                    Spacer()
+                }
+                HStack {
+                    Spacer()
+                    ShareStatusBadge(record: record)
+                }
+            }
+        } else {
+            HStack {
+                periodPill
+                if let cat = selectedCategory {
+                    categoryPill(cat)
+                }
+                Spacer()
+                ShareStatusBadge(record: record)
+            }
+        }
+    }
+
+    private var periodPill: some View {
+        Menu {
+            ForEach(SheetDetailView.Period.allCases) { p in
+                Button {
+                    period = p
+                } label: {
+                    HStack {
+                        Text(p.label)
+                        if p == period { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(period.label)
+                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(record.tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(record.tint.opacity(0.18)))
+        }
+    }
+
+    private func categoryPill(_ cat: ExpenseCategory) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: cat.displaySymbol)
+                .font(.caption2)
+            Text(cat.displayName)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(cat.tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(cat.tint.opacity(0.18)))
     }
 
     /// 支出 / 収入の内訳行。AX サイズでは横一列に収まらないので、
