@@ -1377,12 +1377,16 @@ private struct DiscardGuardedBack<Content: View>: View {
                     // 0pt × 0pt の透明 view。タップ判定もアクセシビリティも
                     // なく、toolbar の見た目には影響しないが、SwiftUI の
                     // confirmationDialog がアンカーする実体として存在する。
+                    // iOS 26 の `.sharedBackgroundVisibility(.hidden)` で、
+                    // Liquid Glass の共有 bar 背景にもこの item が乗らないようにする
+                    // (= バー上に幻のグラス枠が見えるのを防ぐ)
                     Color.clear
                         .frame(width: 0, height: 0)
                         .accessibilityHidden(true)
                         .allowsHitTesting(false)
                         .modifier(modifier)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
     }
 }
