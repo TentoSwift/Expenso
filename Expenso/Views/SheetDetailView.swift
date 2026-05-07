@@ -77,6 +77,78 @@ struct SheetDetailView: View {
     /// 一覧に表示する支出/収入。期間フィルタは適用しない (= 期間ピッカーは
     /// SummaryCard の合計金額にのみ影響し、行の表示は全期間で固定)。
     /// カテゴリピル・検索・並び順はここで適用する。
+    /// 検索中のヒット件数と合計を出すバナー。検索文字列が空 / ヒット 0 件の時は出さない。
+    @ViewBuilder
+    private var searchResultSummary: some View {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty, !filteredExpenses.isEmpty {
+            let totals = searchTotals()
+            let code = record.resolvedDefaultCurrencyCode
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.subheadline)
+                    .foregroundStyle(record.tint)
+                Text("\(filteredExpenses.count) 件")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText(value: Double(filteredExpenses.count)))
+                    .animation(.snappy, value: filteredExpenses.count)
+                Spacer()
+                if totals.expense > 0 {
+                    Label {
+                        Text(CurrencyCatalog.format(totals.expense, code: code))
+                            .monospacedDigit()
+                            .contentTransition(.numericText(value: doubleValue(totals.expense)))
+                            .animation(.snappy, value: totals.expense)
+                    } icon: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                if totals.income > 0 {
+                    Label {
+                        Text(CurrencyCatalog.format(totals.income, code: code))
+                            .monospacedDigit()
+                            .contentTransition(.numericText(value: doubleValue(totals.income)))
+                            .animation(.snappy, value: totals.income)
+                    } icon: {
+                        Image(systemName: "plus.circle")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(record.tint.opacity(0.1))
+            )
+            .padding(.horizontal)
+        }
+    }
+
+    private func searchTotals() -> (expense: Decimal, income: Decimal) {
+        let target = record.resolvedDefaultCurrencyCode
+        let fx = FXRatesService.shared
+        var expenseSum: Decimal = 0
+        var incomeSum: Decimal = 0
+        for e in filteredExpenses {
+            let amt = fx.convert(e.amountDecimal, from: e.resolvedCurrencyCode, to: target) ?? e.amountDecimal
+            switch e.kind {
+            case .expense: expenseSum += amt
+            case .income:  incomeSum += amt
+            }
+        }
+        return (expenseSum, incomeSum)
+    }
+
+    /// `Decimal` を numericText 用の `Double` に。SummaryCard 側にあるが
+    /// SheetDetailView (本体) からは見えないので簡易版を再定義。
+    private func doubleValue(_ d: Decimal) -> Double {
+        NSDecimalNumber(decimal: d).doubleValue
+    }
+
     private var filteredExpenses: [Expense] {
         var list = Array(allExpenses)
         if let cat = selectedCategory {
@@ -110,6 +182,8 @@ struct SheetDetailView: View {
                     categoryPills
                         .padding(.horizontal)
                 }
+
+                searchResultSummary
 
                 if allExpenses.isEmpty {
                     emptyStateInitial
