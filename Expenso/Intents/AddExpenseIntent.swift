@@ -178,7 +178,7 @@ struct AddExpenseIntent: AppIntent {
         }
 
         // 選択肢を組み立て:
-        //   - AI 提案 (subtitle "✨ AI 推奨") ※あれば先頭
+        //   - AI 提案 (subtitle "AI 提案") ※あれば先頭
         //   - シート内のその他カテゴリ (sortOrder 順)
         //   - "未分類のまま" sentinel (id = skipCategoryID)
         var options: [ExpenseCategoryEntity] = []
@@ -186,7 +186,7 @@ struct AddExpenseIntent: AppIntent {
             options.append(ExpenseCategoryEntity(
                 id: suggestedCat.objectID.uriRepresentation().absoluteString,
                 name: suggestedCat.displayName,
-                sheetName: "AI 推奨",
+                sheetName: "AI 提案",
                 kindRaw: suggestedCat.kindRaw ?? TransactionKind.expense.rawValue,
                 symbol: "apple.intelligence"
             ))
