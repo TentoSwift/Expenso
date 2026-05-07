@@ -13,7 +13,14 @@ struct AvatarView: View {
     let photoData: Data?
     let displayName: String
     let colorHex: String
-    var size: CGFloat = 40
+    @ScaledMetric private var size: CGFloat
+
+    init(photoData: Data?, displayName: String, colorHex: String, size: CGFloat = 40) {
+        self.photoData = photoData
+        self.displayName = displayName
+        self.colorHex = colorHex
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
 
     private var initial: String {
         guard let first = displayName.first else { return "?" }
@@ -70,7 +77,12 @@ extension AvatarView {
 /// 受け取った fallback で `AvatarView` を描く。
 struct ObservedMemberAvatar: View {
     @ObservedObject var member: Member
-    var size: CGFloat = 40
+    @ScaledMetric private var size: CGFloat
+
+    init(member: Member, size: CGFloat = 40) {
+        self.member = member
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
 
     var body: some View {
         AvatarView(member: member, size: size)
@@ -81,7 +93,12 @@ struct ObservedMemberAvatar: View {
 /// Shared ストアでオーナー / 他参加者のプロフィールが更新された時に自動で再描画する。
 struct ObservedParticipantProfileAvatar: View {
     @ObservedObject var profile: ParticipantProfile
-    var size: CGFloat = 40
+    @ScaledMetric private var size: CGFloat
+
+    init(profile: ParticipantProfile, size: CGFloat = 40) {
+        self.profile = profile
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
 
     var body: some View {
         AvatarView(
@@ -103,7 +120,23 @@ struct PayerAvatar: View {
     let fallbackName: String
     let fallbackColorHex: String
     let fallbackPhoto: Data?
-    var size: CGFloat = 40
+    @ScaledMetric private var size: CGFloat
+
+    init(
+        member: Member?,
+        participantProfile: ParticipantProfile?,
+        fallbackName: String,
+        fallbackColorHex: String,
+        fallbackPhoto: Data?,
+        size: CGFloat = 40
+    ) {
+        self.member = member
+        self.participantProfile = participantProfile
+        self.fallbackName = fallbackName
+        self.fallbackColorHex = fallbackColorHex
+        self.fallbackPhoto = fallbackPhoto
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
 
     var body: some View {
         if let member {

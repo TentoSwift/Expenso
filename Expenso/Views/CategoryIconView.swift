@@ -11,25 +11,27 @@ import SwiftUI
 struct CategoryIconView: View {
     let symbol: String
     let tint: Color
-    var size: CGFloat = 36
+    /// `@ScaledMetric` で Dynamic Type に追従。
+    /// 引数で渡した `size` をベースに、AX サイズでは比例して大きくなる。
+    @ScaledMetric private var size: CGFloat
 
     init(symbol: String, tint: Color, size: CGFloat = 36) {
         self.symbol = symbol
         self.tint = tint
-        self.size = size
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
     }
 
     init(category: ExpenseCategory, size: CGFloat = 36) {
         self.symbol = category.displaySymbol
         self.tint = category.tint
-        self.size = size
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
     }
 
     /// `Expense.categoryTint` / `categorySymbol` (ParticipantProfile 解決対応版) を表示する。
     init(expense: Expense, size: CGFloat = 36) {
         self.symbol = expense.categorySymbol
         self.tint = expense.categoryTint
-        self.size = size
+        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
     }
 
     var body: some View {
