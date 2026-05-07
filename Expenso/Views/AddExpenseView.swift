@@ -393,37 +393,62 @@ struct AddExpenseView: View {
 
     @ViewBuilder
     private var recurringSection: some View {
-        Section {
-            Toggle("繰り返し", isOn: $isRecurring)
-                .disabled(isRecurringLocked)
-            if isRecurring {
-                Picker("頻度", selection: $frequency) {
-                    ForEach(RecurrenceFrequency.allCases) { f in
-                        Text(f.label).tag(f)
+        if case .edit(let expense) = mode, let rule = expense.relatedRule {
+            // 既に Rule から生成された支出は、ここで Toggle / Stepper を編集させると
+            // 「この項目だけ」と「Rule 全体」が混ざって混乱しやすい。
+            // → Rule の編集画面に飛ばし、頻度・間隔・終了日はそこで触ってもらう。
+            Section {
+                NavigationLink {
+                    EditRecurringRuleView(mode: .edit(rule: rule))
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("定期項目を編集")
+                                .foregroundStyle(.primary)
+                            Text(rule.resolvedFrequency.summary(interval: Int(rule.resolvedInterval)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "repeat")
                     }
                 }
-                Stepper(value: $recurringInterval, in: 1...60) {
-                    HStack {
-                        Text("間隔")
-                        Spacer()
-                        Text(frequency.summary(interval: recurringInterval))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Toggle("終了日を設定", isOn: $hasEndDate)
-                if hasEndDate {
-                    DatePicker("終了日", selection: $endDate, in: date..., displayedComponents: [.date])
-                }
+            } header: {
+                Text("繰り返し")
+            } footer: {
+                Text("この項目は定期項目から自動生成されています。頻度・間隔・終了日は定期項目の編集画面で変更できます。")
+                    .font(.caption2)
             }
-        } header: {
-            Text("繰り返し")
-        } footer: {
-            if isRecurringLocked {
-                Text("この項目は定期項目から自動生成されました。「定期項目」一覧から Rule を削除すると繰り返しを止められます。")
-                    .font(.caption2)
-            } else if isRecurring {
-                Text("この日付を開始日として、未生成分を自動的にシートに追加します。")
-                    .font(.caption2)
+        } else {
+            Section {
+                Toggle("繰り返し", isOn: $isRecurring)
+                    .disabled(isRecurringLocked)
+                if isRecurring {
+                    Picker("頻度", selection: $frequency) {
+                        ForEach(RecurrenceFrequency.allCases) { f in
+                            Text(f.label).tag(f)
+                        }
+                    }
+                    Stepper(value: $recurringInterval, in: 1...60) {
+                        HStack {
+                            Text("間隔")
+                            Spacer()
+                            Text(frequency.summary(interval: recurringInterval))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle("終了日を設定", isOn: $hasEndDate)
+                    if hasEndDate {
+                        DatePicker("終了日", selection: $endDate, in: date..., displayedComponents: [.date])
+                    }
+                }
+            } header: {
+                Text("繰り返し")
+            } footer: {
+                if isRecurring {
+                    Text("この日付を開始日として、未生成分を自動的にシートに追加します。")
+                        .font(.caption2)
+                }
             }
         }
     }
