@@ -727,20 +727,39 @@ private struct DateHeaderView: View {
     let net: Decimal
     let currency: String
     let tint: Color
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack {
-            Text(label)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tint)
-            Spacer()
-            Text(formattedNet)
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(tint))
+        // AX サイズでは日付と日合計の pill が 1 行に収まらず、ラベルが
+        // 切れたり pill がはみ出す。縦 2 段に分けて、合計 pill は右寄せ。
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                HStack {
+                    Spacer()
+                    netPill
+                }
+            }
+        } else {
+            HStack {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                Spacer()
+                netPill
+            }
         }
+    }
+
+    private var netPill: some View {
+        Text(formattedNet)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(tint))
     }
 
     private var formattedNet: String {
