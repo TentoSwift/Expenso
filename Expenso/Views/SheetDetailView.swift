@@ -138,7 +138,7 @@ struct SheetDetailView: View {
             DefaultToolbarItem(kind: .search, placement: .bottomBar)
             ToolbarSpacer(.fixed, placement: .bottomBar)
             ToolbarItem(placement: .bottomBar) {
-                Button {
+                Button(role: .confirm) {
                     showingAddExpense = true
                 } label: {
                     Label("追加", systemImage: "plus")
