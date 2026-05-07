@@ -231,7 +231,9 @@ struct SheetDetailView: View {
             PaywallView()
         }
         .sheet(item: $exportShareItem) { item in
-            ShareSheet(items: [item.url])
+            // CSV / PDF をまずプレビュー表示 → ユーザーが内容確認した上で
+            // 右上の共有ボタンから「ファイルに保存」「AirDrop」「印刷」等を選ぶ。
+            QuickLookPreview(url: item.url)
         }
         .sheet(isPresented: $showingShare) {
             CloudSharingView(record: record)
