@@ -6,6 +6,7 @@
 import Foundation
 import StoreKit
 import Combine
+import CoreData
 
 @MainActor
 final class PurchaseManager: ObservableObject {
@@ -162,6 +163,50 @@ final class PurchaseManager: ObservableObject {
         if wasPremium && !nowPremium {
             NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
         }
+
+        // 自分の Premium 状態を Core Data 側にミラー:
+        //   - 自分が所有するシート → ExpenseSheet.ownerIsPremium
+        //   - 参加中シートの自分の ParticipantProfile.isPremium
+        // CloudKit 同期で他参加者にも届くので、彼らの「シート上限・カテゴリ上限」
+        // 判定にも使える。
+        await Self.propagatePremiumFlag(nowPremium)
+    }
+
+    /// 全シートを走査し、自分の Premium 状態をミラーリングする。
+    /// `viewContext` を main で触るので `@MainActor` 必須。
+    @MainActor
+    private static func propagatePremiumFlag(_ premium: Bool) async {
+        let pc = PersistenceController.shared
+        let ctx = pc.container.viewContext
+        let myRecordName = UserProfileStore.shared.userRecordName ?? ""
+
+        let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        let sheets = (try? ctx.fetch(req)) ?? []
+
+        var dirty = false
+        for sheet in sheets {
+            // 自分が所有するシート (Private store) は ownerIsPremium をミラー。
+            if sheet.isOwnedByCurrentUser {
+                if sheet.ownerIsPremium != premium {
+                    sheet.ownerIsPremium = premium
+                    dirty = true
+                }
+            }
+            // すべてのシートで、自分の ParticipantProfile に isPremium を反映。
+            // (オーナーでも自分の ParticipantProfile を持つ運用)
+            if !myRecordName.isEmpty,
+               let profiles = sheet.participantProfiles as? Set<ParticipantProfile>,
+               let mine = profiles.first(where: { $0.recordName == myRecordName }) {
+                if mine.isPremium != premium {
+                    mine.isPremium = premium
+                    mine.updatedAt = .now
+                    dirty = true
+                }
+            }
+        }
+        if dirty {
+            pc.save()
+        }
     }
 
     private func listenForUpdates() async {
@@ -176,4 +221,49 @@ final class PurchaseManager: ObservableObject {
 
 extension Notification.Name {
     static let expensoPremiumExpired = Notification.Name("ExpensoPremiumExpired")
+}
+
+// MARK: - Free-tier gating
+
+/// 無料プランの上限値。Premium がいれば常に無効化される。
+enum FreeTierLimits {
+    /// 1 シートあたりのカテゴリ最大数 (デフォルト seed 15 + 5 のゆとり)
+    static let categoriesPerSheet: Int = 20
+    /// 自分が「所有」できるシートの最大数 (= 自分が作成したシートのみカウント、
+    /// 共有受け入れシートは数えない)
+    static let ownedSheets: Int = 3
+}
+
+extension PurchaseManager {
+    /// 自分自身が Premium なら true。propagatePremiumFlag が UserDefaults に
+    /// キャッシュしているのでメインスレッド外でも参照できる。
+    static var isCurrentUserPremium: Bool { isPremiumCached }
+
+    /// 指定シートに新しいカテゴリを 1 つ追加できるか。
+    /// 上限は `FreeTierLimits.categoriesPerSheet`。
+    /// シート上に Premium が 1 人でもいれば (= ownerIsPremium or
+    /// 任意の participantProfile.isPremium) 上限を無視できる。
+    static func canAddCategory(to sheet: ExpenseSheet) -> Bool {
+        if isCurrentUserPremium { return true }
+        if sheet.ownerIsPremium { return true }
+        if let profiles = sheet.participantProfiles as? Set<ParticipantProfile>,
+           profiles.contains(where: { $0.isPremium }) {
+            return true
+        }
+        let count = (sheet.categories as? Set<ExpenseCategory>)?.count ?? 0
+        return count < FreeTierLimits.categoriesPerSheet
+    }
+
+    /// 自分が新しい (= 自分所有の) シートを作成できるか。
+    /// `共有受け入れシート` は対象外。`isOwnedByCurrentUser` が true のシート数
+    /// だけでカウントする。
+    @MainActor
+    static func canCreateOwnedSheet() -> Bool {
+        if isCurrentUserPremium { return true }
+        let ctx = PersistenceController.shared.container.viewContext
+        let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        let sheets = (try? ctx.fetch(req)) ?? []
+        let owned = sheets.filter { $0.isOwnedByCurrentUser }.count
+        return owned < FreeTierLimits.ownedSheets
+    }
 }

@@ -46,6 +46,8 @@ struct SheetDetailView: View {
     @State private var selectedCategory: ExpenseCategory?
     @State private var demoOpenCalendar: Bool = false
     @State private var demoOpenTemplates: Bool = false
+    @State private var exportPaywall: Bool = false
+    @State private var exportShareItem: ExportShareItem?
     @State private var demoOpenStats: Bool = false
     @State private var demoOpenChat: Bool = false
     /// AddExpenseView から「定期項目を編集」が押された時にセットされる。
@@ -206,6 +208,17 @@ struct SheetDetailView: View {
                     } label: {
                         Label("テンプレ", systemImage: "doc.on.doc")
                     }
+                    Divider()
+                    Button {
+                        startExport(.csv)
+                    } label: {
+                        Label("CSV にエクスポート", systemImage: "doc.text")
+                    }
+                    Button {
+                        startExport(.pdf)
+                    } label: {
+                        Label("PDF レポート", systemImage: "doc.richtext")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -213,6 +226,12 @@ struct SheetDetailView: View {
         }
         .sheet(isPresented: $showingAddExpense) {
             AddExpenseView(record: record)
+        }
+        .sheet(isPresented: $exportPaywall) {
+            PaywallView()
+        }
+        .sheet(item: $exportShareItem) { item in
+            ShareSheet(items: [item.url])
         }
         .sheet(isPresented: $showingShare) {
             CloudSharingView(record: record)
@@ -423,6 +442,25 @@ struct SheetDetailView: View {
             }
         }
         return result.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// CSV / PDF エクスポートのエントリ。Premium で gate して、
+    /// 通れば一時ファイルを作って `ShareSheet` で共有する。
+    private func startExport(_ kind: ExportKind) {
+        guard PurchaseManager.shared.isPremium else {
+            exportPaywall = true
+            Haptics.warning()
+            return
+        }
+        let url: URL?
+        switch kind {
+        case .csv: url = SheetExporter.writeCSV(for: record)
+        case .pdf: url = SheetExporter.writePDF(for: record)
+        }
+        if let url {
+            exportShareItem = ExportShareItem(url: url, kind: kind)
+            Haptics.success()
+        }
     }
 
     private func duplicate(_ expense: Expense) {

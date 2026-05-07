@@ -16,6 +16,7 @@ struct SheetListView: View {
 
     @State private var showingAddSheet = false
     @State private var showingSettings = false
+    @State private var showingPaywall = false
     @State private var path: [NSManagedObjectID] = []
 
     var body: some View {
@@ -28,7 +29,7 @@ struct SheetListView: View {
                         Text("シートを作成して、家族や友人と支出を共有しましょう。")
                     } actions: {
                         Button {
-                            showingAddSheet = true
+                            tryShowAddSheet()
                         } label: {
                             Label("シートを作成", systemImage: "plus")
                         }
@@ -66,7 +67,7 @@ struct SheetListView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        showingAddSheet = true
+                        tryShowAddSheet()
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -78,7 +79,22 @@ struct SheetListView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+            .sheet(isPresented: $showingPaywall) {
+                PaywallView()
+            }
             .onAppear { applyDemoLaunch() }
+        }
+    }
+
+    /// 新しいシートを追加しようとした時のゲート。
+    /// 自分が所有しているシートが Free 上限 (3) を超えていたら、
+    /// AddSheetView の代わりに PaywallView を提示。
+    private func tryShowAddSheet() {
+        if PurchaseManager.canCreateOwnedSheet() {
+            showingAddSheet = true
+        } else {
+            showingPaywall = true
+            Haptics.warning()
         }
     }
 
