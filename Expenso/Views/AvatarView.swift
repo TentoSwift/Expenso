@@ -13,13 +13,21 @@ struct AvatarView: View {
     let photoData: Data?
     let displayName: String
     let colorHex: String
-    @ScaledMetric private var size: CGFloat
+    private let baseSize: CGFloat
+    @ScaledMetric private var scaledSize: CGFloat
+
+    /// AX5 で 3.5x まで伸びると顔写真が画面の半分を占めてしまうので、
+    /// base の 1.5 倍で頭打ち。
+    private var size: CGFloat {
+        min(scaledSize, baseSize * 1.5)
+    }
 
     init(photoData: Data?, displayName: String, colorHex: String, size: CGFloat = 40) {
         self.photoData = photoData
         self.displayName = displayName
         self.colorHex = colorHex
-        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+        self.baseSize = size
+        self._scaledSize = ScaledMetric(wrappedValue: size, relativeTo: .body)
     }
 
     private var initial: String {
@@ -77,12 +85,8 @@ extension AvatarView {
 /// 受け取った fallback で `AvatarView` を描く。
 struct ObservedMemberAvatar: View {
     @ObservedObject var member: Member
-    @ScaledMetric private var size: CGFloat
-
-    init(member: Member, size: CGFloat = 40) {
-        self.member = member
-        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
-    }
+    /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
+    var size: CGFloat = 40
 
     var body: some View {
         AvatarView(member: member, size: size)
@@ -93,12 +97,8 @@ struct ObservedMemberAvatar: View {
 /// Shared ストアでオーナー / 他参加者のプロフィールが更新された時に自動で再描画する。
 struct ObservedParticipantProfileAvatar: View {
     @ObservedObject var profile: ParticipantProfile
-    @ScaledMetric private var size: CGFloat
-
-    init(profile: ParticipantProfile, size: CGFloat = 40) {
-        self.profile = profile
-        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
-    }
+    /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
+    var size: CGFloat = 40
 
     var body: some View {
         AvatarView(
@@ -120,23 +120,8 @@ struct PayerAvatar: View {
     let fallbackName: String
     let fallbackColorHex: String
     let fallbackPhoto: Data?
-    @ScaledMetric private var size: CGFloat
-
-    init(
-        member: Member?,
-        participantProfile: ParticipantProfile?,
-        fallbackName: String,
-        fallbackColorHex: String,
-        fallbackPhoto: Data?,
-        size: CGFloat = 40
-    ) {
-        self.member = member
-        self.participantProfile = participantProfile
-        self.fallbackName = fallbackName
-        self.fallbackColorHex = fallbackColorHex
-        self.fallbackPhoto = fallbackPhoto
-        self._size = ScaledMetric(wrappedValue: size, relativeTo: .body)
-    }
+    /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
+    var size: CGFloat = 40
 
     var body: some View {
         if let member {
