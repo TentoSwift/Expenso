@@ -21,11 +21,13 @@ struct ExpenseCategoryEntity: AppEntity {
     var name: String
     var sheetName: String
     var kindRaw: String
+    var symbol: String
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(name)",
-            subtitle: "\(sheetName)"
+            subtitle: "\(sheetName)",
+            image: DisplayRepresentation.Image(systemName: symbol)
         )
     }
 }
@@ -70,7 +72,8 @@ extension ExpenseCategoryEntity {
             id: cat.objectID.uriRepresentation().absoluteString,
             name: cat.displayName,
             sheetName: cat.sheet?.displayName ?? "",
-            kindRaw: cat.kindRaw ?? TransactionKind.expense.rawValue
+            kindRaw: cat.kindRaw ?? TransactionKind.expense.rawValue,
+            symbol: cat.displaySymbol
         )
     }
 }

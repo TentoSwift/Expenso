@@ -187,7 +187,8 @@ struct AddExpenseIntent: AppIntent {
                 id: suggestedCat.objectID.uriRepresentation().absoluteString,
                 name: suggestedCat.displayName,
                 sheetName: "✨ AI 推奨",
-                kindRaw: suggestedCat.kindRaw ?? TransactionKind.expense.rawValue
+                kindRaw: suggestedCat.kindRaw ?? TransactionKind.expense.rawValue,
+                symbol: suggestedCat.displaySymbol
             ))
         }
         let sortedOthers = kindCats
@@ -200,7 +201,8 @@ struct AddExpenseIntent: AppIntent {
             id: Self.skipCategoryID,
             name: "未分類のまま",
             sheetName: "(カテゴリなしで保存)",
-            kindRaw: ""
+            kindRaw: "",
+            symbol: "questionmark.circle"
         ))
 
         let dialog: IntentDialog = {
