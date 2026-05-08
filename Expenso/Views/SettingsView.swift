@@ -155,6 +155,13 @@ struct SettingsView: View {
                         DismissConfirmDemoView()
                             .navigationTitle("Dismiss Confirm Demo")
                     }
+                    #if DEBUG
+                    Button("Premium 期限切れの解除フローを試す") {
+                        Task { @MainActor in
+                            await PurchaseManager.runExpiryRevokeForDebug()
+                        }
+                    }
+                    #endif
                 }
 
                 Section {

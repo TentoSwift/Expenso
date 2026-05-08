@@ -7,6 +7,7 @@ import Foundation
 import StoreKit
 import Combine
 import CoreData
+import os
 
 @MainActor
 final class PurchaseManager: ObservableObject {
@@ -164,15 +165,39 @@ final class PurchaseManager: ObservableObject {
         //     persistUpdatedShare とぶつかって main actor がデッドロックする
         //     (= 過去に確認済み) ので、必ず transition (wasPremium && !nowPremium)
         //     の時だけ走らせる。
+        Self.purchaseLog.debug("refreshEntitlements: was=\(wasPremium) now=\(nowPremium) ids=\(ids.joined(separator: ","))")
         if wasPremium && !nowPremium {
+            Self.purchaseLog.debug("Premium transition detected → run expiry path")
             Task { @MainActor in
                 let confirmedExpired = await Self.confirmExpiry()
+                Self.purchaseLog.debug("confirmExpiry → expired=\(confirmedExpired)")
                 guard confirmedExpired else { return }
-                await ShareCoordinator.shared.revokeAllOwnedShares()
+                await Self.performExpiryRevoke()
                 NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
             }
         }
     }
+
+    /// 期限切れ確定時の共有解除処理。テスト用に Settings から
+    /// `runExpiryRevokeForDebug()` でも呼べるよう独立メソッドにしてある。
+    @MainActor
+    static func performExpiryRevoke() async {
+        let ok = await ShareCoordinator.shared.revokeAllOwnedShares()
+        purchaseLog.debug("revokeAllOwnedShares returned \(ok)")
+    }
+
+    #if DEBUG
+    /// デバッグ用: 「Premium が切れた時の解除フロー」を強制的に走らせる。
+    /// 実際の StoreKit 状態は触らない。
+    @MainActor
+    static func runExpiryRevokeForDebug() async {
+        purchaseLog.debug("DEBUG: runExpiryRevokeForDebug invoked")
+        await performExpiryRevoke()
+        NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
+    }
+    #endif
+
+    private static let purchaseLog = Logger(subsystem: "com.tento.Expenso", category: "purchase")
 
     /// `AppStore.sync()` で App Store と同期し直してから、もう 1 度
     /// `Transaction.currentEntitlements` を走査して本当に Premium が無いか確認する。

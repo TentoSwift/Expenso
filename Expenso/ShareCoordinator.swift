@@ -6,6 +6,7 @@
 import Foundation
 import CoreData
 import CloudKit
+import os
 
 enum ShareError: LocalizedError {
     case storeNotReady
@@ -138,46 +139,48 @@ final class ShareCoordinator {
     /// (CKShare レコード自体は CloudKit 側に残るが、参加者ゼロ + 公開権限無しで誰もアクセスできない)
     /// - Returns: 全 share の更新が成功したら `true`。1 つでも失敗したら `false`
     ///   (PurchaseManager がリトライするためのフラグを残す)
+    private static let log = Logger(subsystem: "com.tento.Expenso", category: "share")
+
     @MainActor
     @discardableResult
     func revokeAllOwnedShares() async -> Bool {
         let pc = PersistenceController.shared
-        guard let store = pc.privateStore else { return false }
+        guard let store = pc.privateStore else {
+            Self.log.error("revokeAllOwnedShares: privateStore is nil")
+            return false
+        }
         let shares: [CKShare]
         do {
             shares = try pc.container.fetchShares(in: store)
         } catch {
-            #if DEBUG
-            print("⚠️ revokeAllOwnedShares: fetchShares failed: \(error)")
-            #endif
+            Self.log.error("revokeAllOwnedShares: fetchShares failed: \(error.localizedDescription)")
             return false
         }
+        Self.log.debug("revokeAllOwnedShares: found \(shares.count) shares")
 
         var allSucceeded = true
         for share in shares {
             var didChange = false
-
-            // 1) オーナー以外の参加者を全削除 (招待中・参加済み問わず)
             let nonOwners = share.participants.filter { $0.role != .owner }
+            Self.log.debug("share \(share.recordID.recordName): \(nonOwners.count) non-owner participants, publicPermission=\(String(describing: share.publicPermission.rawValue))")
+
             for participant in nonOwners {
                 share.removeParticipant(participant)
                 didChange = true
             }
-
-            // 2) 公開リンク (AirDrop / メッセージ等で配布された URL) も無効化
             if share.publicPermission != .none {
                 share.publicPermission = .none
                 didChange = true
             }
-
-            guard didChange else { continue }
-
+            guard didChange else {
+                Self.log.debug("share \(share.recordID.recordName): no change, skip")
+                continue
+            }
             do {
                 try await pc.container.persistUpdatedShare(share, in: store)
+                Self.log.debug("share \(share.recordID.recordName): persistUpdatedShare ok")
             } catch {
-                #if DEBUG
-                print("⚠️ revokeAllOwnedShares: persistUpdatedShare failed: \(error)")
-                #endif
+                Self.log.error("share \(share.recordID.recordName): persistUpdatedShare failed: \(error.localizedDescription)")
                 allSucceeded = false
             }
         }
