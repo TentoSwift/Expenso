@@ -67,12 +67,16 @@ final class ShareCoordinator {
         return (try? container.fetchShares(matching: [sheet.objectID]))?[sheet.objectID]
     }
 
-    /// AirDrop / メッセージ等で URL を直接共有できるよう、CKShare を作成し公開権限を付ける。
-    /// 既存の参加者 (権限付き招待) はそのまま維持される。
+    /// CKShare を作成 (or 取得) して URL を返す。
+    /// `publicPermission` は **必ず `.none`** にしてあり、参加できるのは
+    /// `addParticipant` で明示的に招待された Apple ID のみ。
+    /// 既存の share が誤って `.readWrite` 等になっていた場合もここで下げる。
     @MainActor
-    func prepareShareLink(for sheet: ExpenseSheet, publicPermission: CKShare.ParticipantPermission = .readWrite) async throws -> (share: CKShare, url: URL) {
+    func prepareShareLink(for sheet: ExpenseSheet) async throws -> (share: CKShare, url: URL) {
         let share = try await getOrCreateShare(for: sheet)
-        share.publicPermission = publicPermission
+        if share.publicPermission != .none {
+            share.publicPermission = .none
+        }
         let pc = PersistenceController.shared
         guard let store = pc.privateStore else { throw ShareError.storeNotReady }
         try await pc.container.persistUpdatedShare(share, in: store)
