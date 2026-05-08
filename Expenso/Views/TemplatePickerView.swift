@@ -41,9 +41,9 @@ struct TemplatePickerView: View {
             Group {
                 if templates.isEmpty {
                     ContentUnavailableView(
-                        "テンプレがありません",
+                        "テンプレートがありません",
                         systemImage: "doc.text",
-                        description: Text("先に「現在の内容をテンプレに保存」または「定期項目」メニュー → テンプレ管理から追加してください。")
+                        description: Text("先に「現在の内容をテンプレに保存」または「定期項目」メニュー → テンプレート管理から追加してください。")
                     )
                 } else {
                     List {
@@ -52,7 +52,7 @@ struct TemplatePickerView: View {
                     }
                 }
             }
-            .navigationTitle("テンプレから入力")
+            .navigationTitle("テンプレートから入力")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

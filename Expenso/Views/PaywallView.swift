@@ -73,6 +73,8 @@ struct PaywallView: View {
                        subtitle: "無料は 5 枚まで。Premium で無制限")
             featureRow(icon: "tag.fill", title: "カテゴリを無制限に追加",
                        subtitle: "無料は 1 シート 20 まで。共有相手の誰か 1 人が Premium ならそのシートは全員無制限")
+            featureRow(icon: "sparkles.square.filled.on.square", title: "豊富なカテゴリアイコン",
+                       subtitle: "100 種類以上の SF Symbol からカテゴリのアイコンを選べる")
             featureRow(icon: "doc.text", title: "CSV エクスポート",
                        subtitle: "Excel / Numbers で開けるバックアップ")
             featureRow(icon: "doc.richtext", title: "PDF レポート",

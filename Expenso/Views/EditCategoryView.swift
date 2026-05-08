@@ -30,6 +30,7 @@ struct EditCategoryView: View {
     @State private var origName: String = ""
     @State private var origColor: String = ""
     @State private var origSymbol: String = ""
+    @State private var showingPaywallForSymbol: Bool = false
 
     private var navTitle: String {
         switch mode {
@@ -81,6 +82,9 @@ struct EditCategoryView: View {
                 }
             }
             .onAppear { loadIfNeeded() }
+            .sheet(isPresented: $showingPaywallForSymbol) {
+                PaywallView()
+            }
             .confirmationDialog(
                 "「\(name)」を削除しますか?",
                 isPresented: $showDeleteConfirm,
@@ -201,7 +205,7 @@ struct EditCategoryView: View {
     private var iconCard: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 6)
         return LazyVGrid(columns: columns, spacing: 14) {
-            ForEach(CategoryDefaults.availableSymbols, id: \.self) { sym in
+            ForEach(CategoryDefaults.allSymbols, id: \.self) { sym in
                 iconButton(sym)
             }
         }
@@ -211,8 +215,20 @@ struct EditCategoryView: View {
 
     private func iconButton(_ sym: String) -> some View {
         let isSelected = selectedSymbol == sym
+        let isPremiumOnly = CategoryDefaults.isPremiumSymbol(sym)
+        // Premium symbol を非 Premium ユーザーが選ぶのを抑止。
+        // ただし「既に保存済みのシンボル (= 編集ロード時にこの ID と一致)」は
+        // ロックを外して再選択可能にする (= 後で課金が切れた時の救済)。
+        let isLockedForUser = isPremiumOnly
+            && !PurchaseManager.shared.isPremium
+            && sym != origSymbol
         return Button {
-            selectedSymbol = sym
+            if isLockedForUser {
+                showingPaywallForSymbol = true
+                Haptics.warning()
+            } else {
+                selectedSymbol = sym
+            }
         } label: {
             ZStack {
                 if isSelected {
@@ -226,6 +242,16 @@ struct EditCategoryView: View {
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)
                     .font(.callout.weight(.medium))
+                    .opacity(isLockedForUser ? 0.45 : 1)
+                if isLockedForUser {
+                    // 右下に小さな鍵アイコン
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(3)
+                        .background(Circle().fill(Color.accentColor))
+                        .offset(x: 14, y: 14)
+                }
             }
             .frame(height: 50)
         }
