@@ -67,12 +67,16 @@ final class ShareCoordinator {
         return (try? container.fetchShares(matching: [sheet.objectID]))?[sheet.objectID]
     }
 
-    /// AirDrop / メッセージ等で URL を直接共有できるよう、CKShare を作成し公開権限を付ける。
-    /// 既存の参加者 (権限付き招待) はそのまま維持される。
+    /// CKShare を作成 (or 取得) して URL を返す。
+    /// `publicPermission` は **必ず `.none`** にしてあり、参加できるのは
+    /// `addParticipant` で明示的に招待された Apple ID のみ。
+    /// 既存の share が誤って `.readWrite` 等になっていた場合もここで下げる。
     @MainActor
-    func prepareShareLink(for sheet: ExpenseSheet, publicPermission: CKShare.ParticipantPermission = .readWrite) async throws -> (share: CKShare, url: URL) {
+    func prepareShareLink(for sheet: ExpenseSheet) async throws -> (share: CKShare, url: URL) {
         let share = try await getOrCreateShare(for: sheet)
-        share.publicPermission = publicPermission
+        if share.publicPermission != .none {
+            share.publicPermission = .none
+        }
         let pc = PersistenceController.shared
         guard let store = pc.privateStore else { throw ShareError.storeNotReady }
         try await pc.container.persistUpdatedShare(share, in: store)
@@ -86,6 +90,33 @@ final class ShareCoordinator {
         let pc = PersistenceController.shared
         guard let store = pc.privateStore else { throw ShareError.storeNotReady }
         try await pc.container.persistUpdatedShare(share, in: store)
+    }
+
+    /// 参加者として共有シートから退出する。CloudKit Sharing zone をローカルでだけ purge し、
+    /// オーナーや他の参加者の側のデータには影響を与えない。
+    /// (ctx.delete(record) を使うと共有レコードの削除としてオーナーにも伝搬してしまう)
+    @MainActor
+    func leaveSharedSheet(_ sheet: ExpenseSheet) async throws {
+        let pc = PersistenceController.shared
+        guard let sharedStore = pc.sharedStore else { throw ShareError.storeNotReady }
+
+        // シートの CKShare から zoneID を取得
+        let zoneID: CKRecordZone.ID? = {
+            if let share = existingShare(for: sheet) {
+                return share.recordID.zoneID
+            }
+            // CKShare がローカルに無い場合 (rare) は ObjectID から推測
+            return nil
+        }()
+
+        guard let zoneID else { throw ShareError.storeNotReady }
+
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            pc.container.purgeObjectsAndRecordsInZone(with: zoneID, in: sharedStore) { _, error in
+                if let error { cont.resume(throwing: error) }
+                else { cont.resume() }
+            }
+        }
     }
 
     /// 自分が所有する CKShare のうち、参加者がいる/公開リンクが有効なものが残っているか。

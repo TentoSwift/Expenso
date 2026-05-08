@@ -40,10 +40,35 @@ struct SheetDetailView: View {
     @State private var showingAddExpense = false
     @State private var showingShare = false
     @State private var editingExpense: Expense?
+    @State private var editingRule: RecurringRule?
     @State private var showingEditGroup = false
     @State private var searchText: String = ""
     @State private var selectedCategory: ExpenseCategory?
+    @State private var demoOpenCalendar: Bool = false
+    @State private var demoOpenTemplates: Bool = false
+    @State private var exportPaywall: Bool = false
+    @State private var exportShareItem: ExportShareItem?
+    @State private var demoOpenStats: Bool = false
+    @State private var demoOpenChat: Bool = false
+    /// AddExpenseView から「定期項目を編集」が押された時にセットされる。
+    /// シートが閉じきった後で `recurringListAutoEdit` に流して RecurringListView へ push する。
+    @State private var pendingEditRule: RecurringRule?
+    @State private var showRecurringListAutoEdit: Bool = false
+    @State private var recurringListAutoEdit: RecurringRule?
     @AppStorage("expenseSortOption") private var sortOptionRaw: String = SortOption.dateDesc.rawValue
+
+    /// シート配下の Expense を直接観測。`record.expenses` 経由だと子の attribute 変更
+    /// (date / amount 等) で SwiftUI 再描画が走らず、編集後に古い日付グループに残り続けてしまう。
+    @FetchRequest private var allExpenses: FetchedResults<Expense>
+
+    init(record: ExpenseSheet) {
+        self.record = record
+        self._allExpenses = FetchRequest<Expense>(
+            sortDescriptors: [NSSortDescriptor(keyPath: \Expense.date, ascending: false)],
+            predicate: NSPredicate(format: "sheet == %@", record),
+            animation: .default
+        )
+    }
 
     private var sortOption: SortOption {
         SortOption(rawValue: sortOptionRaw) ?? .dateDesc
@@ -51,24 +76,11 @@ struct SheetDetailView: View {
 
     // MARK: - Filtering
 
-    private var periodExpenses: [Expense] {
-        let cal = Calendar.current
-        let now = Date()
-        return record.sortedExpenses.filter { e in
-            guard let d = e.date else { return false }
-            switch period {
-            case .thisMonth: return cal.isDate(d, equalTo: now, toGranularity: .month)
-            case .lastMonth:
-                guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return false }
-                return cal.isDate(d, equalTo: lm, toGranularity: .month)
-            case .thisYear:  return cal.isDate(d, equalTo: now, toGranularity: .year)
-            case .all:       return true
-            }
-        }
-    }
-
+    /// 一覧に表示する支出/収入。期間フィルタは適用しない (= 期間ピッカーは
+    /// SummaryCard の合計金額にのみ影響し、行の表示は全期間で固定)。
+    /// カテゴリピル・検索・並び順はここで適用する。
     private var filteredExpenses: [Expense] {
-        var list = periodExpenses
+        var list = Array(allExpenses)
         if let cat = selectedCategory {
             list = list.filter { $0.category?.objectID == cat.objectID }
         }
@@ -90,37 +102,43 @@ struct SheetDetailView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(spacing: 16) {
-                    SummaryCard(record: record, period: $period)
+        ScrollView {
+            VStack(spacing: 16) {
+                SummaryCard(
+                    record: record,
+                    period: $period,
+                    selectedCategory: selectedCategory,
+                    searchQuery: searchText.trimmingCharacters(in: .whitespaces)
+                )
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                if !allExpenses.isEmpty {
+                    categoryPills
                         .padding(.horizontal)
-                        .padding(.top, 8)
-
-                    if !record.sortedExpenses.isEmpty {
-                        categoryPills
-                            .padding(.horizontal)
-                    }
-
-                    if record.sortedExpenses.isEmpty {
-                        emptyStateInitial
-                            .padding(.top, 40)
-                    } else if filteredExpenses.isEmpty {
-                        emptyStateFiltered
-                            .padding(.top, 40)
-                    } else {
-                        sectionedList
-                            .padding(.horizontal)
-                    }
                 }
-                .padding(.bottom, 100) // floating bar の余白
-            }
 
-            floatingBottomBar
+                if allExpenses.isEmpty {
+                    emptyStateInitial
+                        .padding(.top, 40)
+                } else if filteredExpenses.isEmpty {
+                    emptyStateFiltered
+                        .padding(.top, 40)
+                } else {
+                    sectionedList
+                        .padding(.horizontal)
+                }
+            }
+            .padding(.bottom, 16)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle(record.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        // iOS 26: 検索バーは bottomBar の DefaultToolbarItem に置き、`+` を ToolbarItem で
+        // 並列に並べる。ToolbarSpacer で間を空ける。
+        // (Liquid Glass デザインの推奨パターン:
+        //  https://qiita.com/RS6/items/2f55281499ef7bad96b2)
+        .searchable(text: $searchText, placement: .toolbar, prompt: Text("支出を検索"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -129,12 +147,39 @@ struct SheetDetailView: View {
                     Image(systemName: record.isOwnedByCurrentUser ? "person.crop.circle.badge.plus" : "person.2.fill")
                 }
             }
+            DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            ToolbarSpacer(.fixed, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) {
+                Button(role: .confirm) {
+                    showingAddExpense = true
+                } label: {
+                    Label("追加", systemImage: "plus")
+                }
+                .tint(record.tint)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    NavigationLink {
+                        SheetCalendarView(record: record)
+                    } label: {
+                        Label("カレンダー", systemImage: "calendar")
+                    }
+                    NavigationLink {
+                        SettlementView(record: record)
+                    } label: {
+                        Label("精算", systemImage: "arrow.left.arrow.right.circle")
+                    }
                     NavigationLink {
                         StatsView(record: record)
                     } label: {
                         Label("統計を見る", systemImage: "chart.pie.fill")
+                    }
+                    if SheetAIChat.isAvailable {
+                        NavigationLink {
+                            SheetAIChatView(record: record)
+                        } label: {
+                            Label("AI チャット", systemImage: "sparkles.rectangle.stack")
+                        }
                     }
                     Divider()
                     Picker("並び順", selection: $sortOptionRaw) {
@@ -153,6 +198,27 @@ struct SheetDetailView: View {
                     } label: {
                         Label("カテゴリを管理", systemImage: "tag.fill")
                     }
+                    NavigationLink {
+                        RecurringListView(record: record)
+                    } label: {
+                        Label("定期項目", systemImage: "repeat")
+                    }
+                    NavigationLink {
+                        TemplateListView(record: record)
+                    } label: {
+                        Label("テンプレ", systemImage: "doc.on.doc")
+                    }
+                    Divider()
+                    Button {
+                        startExport(.csv)
+                    } label: {
+                        Label("CSV にエクスポート", systemImage: "doc.text")
+                    }
+                    Button {
+                        startExport(.pdf)
+                    } label: {
+                        Label("PDF レポート", systemImage: "doc.richtext")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -161,11 +227,32 @@ struct SheetDetailView: View {
         .sheet(isPresented: $showingAddExpense) {
             AddExpenseView(record: record)
         }
+        .sheet(isPresented: $exportPaywall) {
+            PaywallView()
+        }
+        .sheet(item: $exportShareItem) { item in
+            // CSV / PDF をまずプレビュー表示 → ユーザーが内容確認した上で
+            // 右上の共有ボタンから「ファイルに保存」「AirDrop」「印刷」等を選ぶ。
+            QuickLookPreview(url: item.url)
+        }
         .sheet(isPresented: $showingShare) {
             CloudSharingView(record: record)
         }
-        .sheet(item: $editingExpense) { expense in
-            AddExpenseView(expense: expense)
+        .sheet(item: $editingExpense, onDismiss: {
+            // 「定期項目を編集」経由で閉じた時だけ、RecurringListView に
+            // 遷移して該当 Rule の編集シートを自動で開く。
+            if let rule = pendingEditRule {
+                pendingEditRule = nil
+                recurringListAutoEdit = rule
+                showRecurringListAutoEdit = true
+            }
+        }) { expense in
+            AddExpenseView(expense: expense, onEditRule: { rule in
+                pendingEditRule = rule
+            })
+        }
+        .sheet(item: $editingRule) { rule in
+            EditRecurringRuleView(mode: .edit(rule: rule))
         }
         .sheet(isPresented: $showingEditGroup) {
             EditSheetView(record: record)
@@ -176,9 +263,32 @@ struct SheetDetailView: View {
             case "share": showingShare = true
             case "editGroup": showingEditGroup = true
             case "editExpense":
-                if let first = record.sortedExpenses.first { editingExpense = first }
+                if let first = allExpenses.first { editingExpense = first }
+            case "calendar":
+                demoOpenCalendar = true
+            case "templates":
+                demoOpenTemplates = true
+            case "stats":
+                demoOpenStats = true
+            case "chat":
+                demoOpenChat = true
             default: break
             }
+        }
+        .navigationDestination(isPresented: $showRecurringListAutoEdit) {
+            RecurringListView(record: record, autoEditRule: recurringListAutoEdit)
+        }
+        .navigationDestination(isPresented: $demoOpenCalendar) {
+            SheetCalendarView(record: record)
+        }
+        .navigationDestination(isPresented: $demoOpenTemplates) {
+            TemplateListView(record: record)
+        }
+        .navigationDestination(isPresented: $demoOpenStats) {
+            StatsView(record: record)
+        }
+        .navigationDestination(isPresented: $demoOpenChat) {
+            SheetAIChatView(record: record)
         }
     }
 
@@ -218,6 +328,13 @@ struct SheetDetailView: View {
                             .contextMenu {
                                 Button { editingExpense = expense } label: {
                                     Label("編集", systemImage: "pencil")
+                                }
+                                if expense.generatedFromRuleID != nil {
+                                    Button {
+                                        editingRule = expense.relatedRule
+                                    } label: {
+                                        Label("定期項目を編集", systemImage: "repeat")
+                                    }
                                 }
                                 Button { duplicate(expense) } label: {
                                     Label("複製", systemImage: "doc.on.doc")
@@ -283,43 +400,6 @@ struct SheetDetailView: View {
         }
     }
 
-    private var floatingBottomBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("検索", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(Capsule().fill(.regularMaterial))
-
-            Button {
-                showingAddExpense = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(record.tint.gradient))
-                    .shadow(color: record.tint.opacity(0.4), radius: 8, y: 3)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-    }
-
     // MARK: - Helpers
 
     private struct DaySection {
@@ -357,7 +437,7 @@ struct SheetDetailView: View {
     private var usedCategories: [ExpenseCategory] {
         var seen: Set<NSManagedObjectID> = []
         var result: [ExpenseCategory] = []
-        for exp in record.sortedExpenses {
+        for exp in allExpenses {
             if let cat = exp.category, !seen.contains(cat.objectID) {
                 seen.insert(cat.objectID)
                 result.append(cat)
@@ -366,16 +446,32 @@ struct SheetDetailView: View {
         return result.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// CSV / PDF エクスポートのエントリ。Premium で gate して、
+    /// 通れば一時ファイルを作って `ShareSheet` で共有する。
+    private func startExport(_ kind: ExportKind) {
+        guard PurchaseManager.shared.isPremium else {
+            exportPaywall = true
+            Haptics.warning()
+            return
+        }
+        let url: URL?
+        switch kind {
+        case .csv: url = SheetExporter.writeCSV(for: record)
+        case .pdf: url = SheetExporter.writePDF(for: record)
+        }
+        if let url {
+            exportShareItem = ExportShareItem(url: url, kind: kind)
+            Haptics.success()
+        }
+    }
+
     private func duplicate(_ expense: Expense) {
         let pc = PersistenceController.shared
         let copy = Expense(context: viewContext)
 
         // 1) 親シートと同じストアに先に割り当てる
-        let coord = pc.container.persistentStoreCoordinator
         let parentSheet = expense.sheet
-        let parentStore: NSPersistentStore? = parentSheet.flatMap {
-            coord.persistentStore(for: $0.objectID.uriRepresentation())
-        }
+        let parentStore: NSPersistentStore? = parentSheet?.objectID.persistentStore
         if let store = parentStore {
             viewContext.assign(copy, to: store)
         }
@@ -387,6 +483,7 @@ struct SheetDetailView: View {
         copy.currencyCode = expense.currencyCode
         copy.categoryRaw = expense.categoryRaw
         copy.paidBy = expense.paidBy
+        copy.payerProfileID = expense.payerProfileID
         copy.date = .now
         copy.note = expense.note
         copy.createdAt = .now
@@ -394,7 +491,7 @@ struct SheetDetailView: View {
         // 3) 関係 (同一ストア内のみ)
         copy.sheet = parentSheet
         if let cat = expense.category,
-           coord.persistentStore(for: cat.objectID.uriRepresentation()) == parentStore {
+           cat.objectID.persistentStore == parentStore {
             copy.category = cat
         }
         pc.save()
@@ -407,30 +504,87 @@ struct SheetDetailView: View {
 private struct SummaryCard: View {
     @ObservedObject var record: ExpenseSheet
     @Binding var period: SheetDetailView.Period
+    let selectedCategory: ExpenseCategory?
+    /// 親 view (SheetDetailView) の searchText (trimmed)。空でなければ
+    /// 集計を検索ヒットに絞る + ヘッダーを「検索: \"...\" • N 件」表示に切替。
+    let searchQuery: String
     @ObservedObject private var fx = FXRatesService.shared
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// 子 Expense の編集 (amount 変更等) は ExpenseSheet の objectWillChange を発火させないため、
+    /// `record.expenses` 経由で集計すると view が再描画されない。
+    /// @FetchRequest を直接観測することで、expense 単位の変更でも合計表示が即時更新される。
+    @FetchRequest private var expenses: FetchedResults<Expense>
+
+    init(
+        record: ExpenseSheet,
+        period: Binding<SheetDetailView.Period>,
+        selectedCategory: ExpenseCategory? = nil,
+        searchQuery: String = ""
+    ) {
+        self.record = record
+        self._period = period
+        self.selectedCategory = selectedCategory
+        self.searchQuery = searchQuery
+        self._expenses = FetchRequest<Expense>(
+            sortDescriptors: [NSSortDescriptor(keyPath: \Expense.date, ascending: false)],
+            predicate: NSPredicate(format: "sheet == %@", record),
+            animation: .default
+        )
+    }
+
+    private var isSearching: Bool { !searchQuery.isEmpty }
 
     private var code: String { record.resolvedDefaultCurrencyCode }
 
-    private func totals() -> (expense: Decimal, income: Decimal, missing: Set<String>) {
+    private func totals() -> (expense: Decimal, income: Decimal, missing: Set<String>, hitCount: Int) {
         let cal = Calendar.current
         let now = Date()
-        switch period {
-        case .thisMonth:
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: now, toGranularity: .month)
+        let periodFilter: (Expense) -> Bool
+        // 検索中は期間フィルタを外す (= シート全体から検索) — 検索結果が
+        // 当月外にあると 0 件と思われる UX を避ける。
+        if isSearching {
+            periodFilter = { _ in true }
+        } else {
+            switch period {
+            case .thisMonth:
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .month) }
+            case .lastMonth:
+                guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return (.zero, .zero, [], 0) }
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: lm, toGranularity: .month) }
+            case .thisYear:
+                periodFilter = { cal.isDate($0.date ?? .distantPast, equalTo: now, toGranularity: .year) }
+            case .all:
+                periodFilter = { _ in true }
             }
-        case .lastMonth:
-            guard let lm = cal.date(byAdding: .month, value: -1, to: now) else { return (.zero, .zero, []) }
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: lm, toGranularity: .month)
-            }
-        case .thisYear:
-            return record.convertedTotals { e in
-                cal.isDate(e.date ?? .distantPast, equalTo: now, toGranularity: .year)
-            }
-        case .all:
-            return record.convertedTotals()
         }
+        let categoryID = selectedCategory?.objectID
+        let target = code
+        let q = searchQuery.lowercased()
+        var expenseSum: Decimal = 0
+        var incomeSum: Decimal = 0
+        var missing: Set<String> = []
+        var hitCount = 0
+        for e in expenses where periodFilter(e) {
+            if let categoryID, e.category?.objectID != categoryID { continue }
+            if !q.isEmpty {
+                let matches = e.displayTitle.lowercased().contains(q)
+                    || e.displayPaidBy.lowercased().contains(q)
+                    || (e.note ?? "").lowercased().contains(q)
+                if !matches { continue }
+            }
+            hitCount += 1
+            let from = e.resolvedCurrencyCode
+            guard let converted = fx.convert(e.amountDecimal, from: from, to: target) else {
+                missing.insert(from)
+                continue
+            }
+            switch e.kind {
+            case .expense: expenseSum += converted
+            case .income:  incomeSum += converted
+            }
+        }
+        return (expenseSum, incomeSum, missing, hitCount)
     }
 
     var body: some View {
@@ -438,57 +592,28 @@ private struct SummaryCard: View {
         let net = t.income - t.expense
         let tint = record.tint
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Menu {
-                    ForEach(SheetDetailView.Period.allCases) { p in
-                        Button {
-                            period = p
-                        } label: {
-                            HStack {
-                                Text(p.label)
-                                if p == period { Image(systemName: "checkmark") }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(period.label)
-                            .font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(record.tint)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(record.tint.opacity(0.18)))
-                }
-                Spacer()
-                ShareStatusBadge(record: record)
-            }
+            summaryHeader
 
             VStack(spacing: 4) {
                 Text(CurrencyCatalog.format(net, code: code))
                     .font(.system(size: 38, weight: .bold).monospacedDigit())
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
-                HStack(spacing: 24) {
-                    Label {
-                        Text(CurrencyCatalog.format(t.expense, code: code))
-                            .monospacedDigit()
-                    } icon: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .foregroundStyle(.secondary)
+                    // ネット合計は固定 38pt なので AX でも 1 行に収まるように
+                    // 必要なら自動縮小して伸長は許す。
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    // 期間切替や Expense 編集で値が変わった時、桁ごとに
+                    // ロール表示するアニメーション。
+                    .contentTransition(.numericText(value: doubleValue(net)))
+                    .animation(.snappy, value: net)
+                expenseIncomeBreakdown(expense: t.expense, income: t.income)
+            }
 
-                    Label {
-                        Text(CurrencyCatalog.format(t.income, code: code))
-                            .monospacedDigit()
-                    } icon: {
-                        Image(systemName: "plus.circle")
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .font(.subheadline)
+            // 月予算の進捗バー (今月 + カテゴリ未選択時のみ)
+            if !isSearching, period == .thisMonth, selectedCategory == nil,
+               let budget = record.monthlyBudgetDecimal {
+                budgetProgress(spent: t.expense, budget: budget)
             }
 
             if !t.missing.isEmpty {
@@ -509,9 +634,191 @@ private struct SummaryCard: View {
         )
     }
 
+    /// `Decimal` をロール表示用 `Double` に。`Decimal` は直接 `numericText(value:)`
+    /// に渡せないので Double に変換する。±1e15 を超える金額は誤差が出るが、
+    /// 家計簿の合計には十分な精度。
+    private func doubleValue(_ d: Decimal) -> Double {
+        NSDecimalNumber(decimal: d).doubleValue
+    }
+
+    /// 集計カードのヘッダー (期間 pill + カテゴリ pill + 共有バッジ)。
+    /// 1 行に収まらなくなる AX では、pill 群と共有バッジを縦 2 段に分ける。
+    @ViewBuilder
+    private var summaryHeader: some View {
+        // 検索中は期間 pill の代わりに「検索: \"q\" • N 件」 pill を出す。
+        // (period は検索終了後に元の値で復活)
+        let leadingPill = AnyView(isSearching ? AnyView(searchPill) : AnyView(periodPill))
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    leadingPill
+                    if let cat = selectedCategory {
+                        categoryPill(cat)
+                    }
+                    Spacer()
+                }
+                HStack {
+                    Spacer()
+                    ShareStatusBadge(record: record)
+                }
+            }
+        } else {
+            HStack {
+                leadingPill
+                if let cat = selectedCategory {
+                    categoryPill(cat)
+                }
+                Spacer()
+                ShareStatusBadge(record: record)
+            }
+        }
+    }
+
+    private var searchPill: some View {
+        let count = totals().hitCount
+        return HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption.weight(.bold))
+            Text("\"\(searchQuery)\" • \(count) 件")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(record.tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(record.tint.opacity(0.18)))
+    }
+
+    private var periodPill: some View {
+        Menu {
+            ForEach(SheetDetailView.Period.allCases) { p in
+                Button {
+                    period = p
+                } label: {
+                    HStack {
+                        Text(p.label)
+                        if p == period { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(period.label)
+                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(record.tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(record.tint.opacity(0.18)))
+        }
+    }
+
+    private func categoryPill(_ cat: ExpenseCategory) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: cat.displaySymbol)
+                .font(.caption2)
+            Text(cat.displayName)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(cat.tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(cat.tint.opacity(0.18)))
+    }
+
+    /// 支出 / 収入の内訳行。AX サイズでは横一列に収まらないので、
+    /// `AnyLayout` で V/H を切替 (WWDC24 推奨パターン)。
+    @ViewBuilder
+    private func expenseIncomeBreakdown(expense: Decimal, income: Decimal) -> some View {
+        let layout: AnyLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 24))
+
+        layout {
+            Label {
+                Text(CurrencyCatalog.format(expense, code: code))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: doubleValue(expense)))
+                    .animation(.snappy, value: expense)
+            } icon: {
+                Image(systemName: "minus.circle")
+            }
+            .foregroundStyle(.secondary)
+
+            Label {
+                Text(CurrencyCatalog.format(income, code: code))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: doubleValue(income)))
+                    .animation(.snappy, value: income)
+            } icon: {
+                Image(systemName: "plus.circle")
+            }
+            .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        .frame(
+            maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+            alignment: .leading
+        )
+    }
+
     private var hasMultipleCurrencies: Bool {
-        let codes = Set(((record.expenses as? Set<Expense>) ?? []).map { $0.resolvedCurrencyCode })
-        return codes.count > 1
+        Set(expenses.map { $0.resolvedCurrencyCode }).count > 1
+    }
+
+    /// 月予算の進捗バー。
+    /// - 80% 未満: アクセントカラー
+    /// - 80% 以上 100% 未満: オレンジ
+    /// - 100% 以上 (= 超過): 赤、超過分の表示も追加
+    @ViewBuilder
+    private func budgetProgress(spent: Decimal, budget: Decimal) -> some View {
+        let ratio = NSDecimalNumber(decimal: spent / budget).doubleValue
+        let clamped = max(0, min(1, ratio))
+        let isOver = spent > budget
+        let color: Color = isOver ? .red : (ratio >= 0.8 ? .orange : record.tint)
+        let remaining = budget - spent
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("月予算", systemImage: "target")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isOver {
+                    Text("超過 \(CurrencyCatalog.format(-remaining, code: code))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.red)
+                } else {
+                    Text("残り \(CurrencyCatalog.format(remaining, code: code))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(color)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.tertiarySystemBackground))
+                    Capsule()
+                        .fill(color.gradient)
+                        .frame(width: geo.size.width * clamped)
+                }
+            }
+            .frame(height: 8)
+            HStack {
+                Text("\(CurrencyCatalog.format(spent, code: code)) / \(CurrencyCatalog.format(budget, code: code))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((ratio * 100).rounded()))%")
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 
@@ -522,20 +829,39 @@ private struct DateHeaderView: View {
     let net: Decimal
     let currency: String
     let tint: Color
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack {
-            Text(label)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tint)
-            Spacer()
-            Text(formattedNet)
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(tint))
+        // AX サイズでは日付と日合計の pill が 1 行に収まらず、ラベルが
+        // 切れたり pill がはみ出す。縦 2 段に分けて、合計 pill は右寄せ。
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                HStack {
+                    Spacer()
+                    netPill
+                }
+            }
+        } else {
+            HStack {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                Spacer()
+                netPill
+            }
         }
+    }
+
+    private var netPill: some View {
+        Text(formattedNet)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(tint))
     }
 
     private var formattedNet: String {
@@ -552,55 +878,124 @@ private struct DateHeaderView: View {
 
 private struct ExpenseRowView: View {
     @ObservedObject var expense: Expense
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(expense.categoryTint.gradient)
-                Image(systemName: expense.categorySymbol)
-                    .foregroundStyle(.white)
-                    .font(.callout.weight(.semibold))
+    /// 支払/受取の人がいればカテゴリアイコンの右下にアバターを重ねる。
+    /// (居なければカテゴリアイコンのみ)
+    @ViewBuilder
+    private var categoryIconWithPayer: some View {
+        let payerName = expense.displayPaidBy
+        ZStack(alignment: .bottomTrailing) {
+            CategoryIconView(expense: expense, size: 36)
+            if !payerName.isEmpty {
+                PayerAvatar(
+                    member: expense.resolvedPayer,
+                    participantProfile: expense.resolvedParticipantProfile,
+                    fallbackName: payerName,
+                    fallbackColorHex: "#8E8E93",
+                    fallbackPhoto: nil,
+                    size: 18
+                )
+                .overlay(
+                    Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                )
+                .offset(x: 4, y: 4)
             }
-            .frame(width: 36, height: 36)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(expense.displayTitle.isEmpty ? expense.categoryDisplayName : expense.displayTitle)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                if showSubtitle {
-                    HStack(spacing: 6) {
-                        if let paidBy = expense.paidBy, !paidBy.isEmpty {
-                            Image(systemName: expense.payerSymbol)
-                                .font(.caption2)
-                                .foregroundStyle(expense.payerTint)
-                            Text(paidBy)
-                                .foregroundStyle(expense.payerTint)
-                        }
-                        if let note = expense.note, !note.isEmpty {
-                            if !(expense.paidBy?.isEmpty ?? true) { Text("·").foregroundStyle(.secondary) }
-                            Text(note)
-                                .lineLimit(1)
-                                .foregroundStyle(.secondary)
-                        }
+    @ViewBuilder
+    private var titleAndSubtitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(expense.displayTitle.isEmpty ? expense.categoryDisplayName : expense.displayTitle)
+                .font(.body)
+                .foregroundStyle(.primary)
+            if showSubtitle {
+                HStack(spacing: 6) {
+                    let displayName = expense.displayPaidBy
+                    if !displayName.isEmpty {
+                        Text(displayName)
+                            .foregroundStyle(expense.payerTint)
                     }
-                    .font(.caption)
+                    if let note = expense.note, !note.isEmpty {
+                        if !displayName.isEmpty { Text("·").foregroundStyle(.secondary) }
+                        Text(note)
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .font(.caption)
             }
+        }
+    }
 
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
+    @ViewBuilder
+    private var amountAndCurrency: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            HStack(spacing: 4) {
+                if expense.generatedFromRuleID != nil {
+                    Image(systemName: "repeat")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Text(expense.formattedSignedAmount)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.primary)
-                if expense.resolvedCurrencyCode != (expense.sheet?.resolvedDefaultCurrencyCode ?? "JPY") {
-                    Text(expense.resolvedCurrencyCode)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+            }
+            if expense.resolvedCurrencyCode != (expense.sheet?.resolvedDefaultCurrencyCode ?? "JPY") {
+                Text(expense.resolvedCurrencyCode)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    var body: some View {
+        // Dynamic Type が AX サイズに上がると 1 列に詰まったレイアウトが破綻する。
+        // Apple Music の AX 表示にならって、ヘッダー行 (アイコン+金額) →
+        // タイトル (全幅で wrap) → サブタイトル の 3 段に展開する。
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top) {
+                    categoryIconWithPayer
+                    Spacer(minLength: 12)
+                    amountAndCurrency
+                }
+                Text(expense.displayTitle.isEmpty ? expense.categoryDisplayName : expense.displayTitle)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showSubtitle {
+                    accessibilitySubtitle
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                categoryIconWithPayer
+                titleAndSubtitle
+                Spacer()
+                amountAndCurrency
+            }
+        }
+    }
+
+    /// AX 用のサブタイトル: 払った人 (色付き) と note を改行ありで縦に並べる。
+    /// (通常レイアウトの 1 行 HStack と違い、長い note を切らない)
+    @ViewBuilder
+    private var accessibilitySubtitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let displayName = expense.displayPaidBy
+            if !displayName.isEmpty {
+                Text(displayName)
+                    .foregroundStyle(expense.payerTint)
+            }
+            if let note = expense.note, !note.isEmpty {
+                Text(note)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var showSubtitle: Bool {

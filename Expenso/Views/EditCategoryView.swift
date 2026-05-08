@@ -16,19 +16,25 @@ struct EditCategoryView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     let mode: Mode
+    var defaultKind: TransactionKind = .expense
     var onSave: ((ExpenseCategory) -> Void)? = nil
 
     @State private var name: String = ""
     @State private var selectedColor: String = "#FF9500"
     @State private var selectedSymbol: String = "fork.knife"
     @State private var customColor: Color = .orange
+    @State private var kind: TransactionKind = .expense
     @State private var didLoad: Bool = false
     @State private var showDeleteConfirm: Bool = false
+
+    @State private var origName: String = ""
+    @State private var origColor: String = ""
+    @State private var origSymbol: String = ""
 
     private var navTitle: String {
         switch mode {
         case .create: "新しいカテゴリ"
-        case .edit: "カテゴリを編集"
+        case .edit:   "カテゴリを編集"
         }
     }
 
@@ -36,138 +42,242 @@ struct EditCategoryView: View {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("名前") {
-                    TextField("例: コーヒー", text: $name)
-                }
-
-                Section("プレビュー") {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(previewColor.opacity(0.18))
-                                .frame(width: 56, height: 56)
-                            Image(systemName: selectedSymbol)
-                                .font(.title)
-                                .foregroundStyle(previewColor)
-                        }
-                        Text(name.isEmpty ? "(名前未入力)" : name)
-                            .font(.headline)
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                Section("カラー") {
-                    paletteRow
-                    ColorPicker("カスタムカラー", selection: $customColor, supportsOpacity: false)
-                        .onChange(of: customColor) { _, newValue in
-                            selectedColor = newValue.toHex() ?? selectedColor
-                        }
-                }
-
-                Section("アイコン") {
-                    iconGrid
-                }
-
-                if case .edit(let category) = mode, !category.isBuiltIn {
-                    Section {
-                        Button(role: .destructive) {
-                            showDeleteConfirm = true
-                        } label: {
-                            Label("カテゴリを削除", systemImage: "trash")
-                                .frame(maxWidth: .infinity)
-                        }
-                    } footer: {
-                        Text("このカテゴリを削除しても、紐付いていた支出は残ります。")
-                    }
-                }
-            }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(!canSave)
-                }
-            }
-            .onAppear { loadIfNeeded() }
-            .confirmationDialog("「\(name)」を削除しますか?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("削除", role: .destructive) { deleteCategory() }
-                Button("キャンセル", role: .cancel) {}
-            }
-        }
-    }
-
     private var previewColor: Color {
         Color(hex: selectedColor) ?? .gray
     }
 
-    private var paletteRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(CategoryDefaults.palette, id: \.self) { hex in
-                    Circle()
-                        .fill(Color(hex: hex) ?? .gray)
-                        .frame(width: 32, height: 32)
-                        .overlay {
-                            if selectedColor == hex {
-                                Image(systemName: "checkmark")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .onTapGesture {
-                            selectedColor = hex
-                            customColor = Color(hex: hex) ?? .gray
-                        }
+    private var isEditingBuiltIn: Bool {
+        if case .edit(let cat) = mode { return cat.isBuiltIn }
+        return false
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    headerCard
+                    if case .create = mode {
+                        kindCard
+                    }
+                    colorCard
+                    iconCard
+                    if case .edit = mode {
+                        deleteCard
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    circleToolbarButton(systemImage: "xmark") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    circleToolbarButton(systemImage: "checkmark") { save() }
+                        .disabled(!canSave)
+                        .opacity(canSave ? 1 : 0.4)
                 }
             }
-            .padding(.vertical, 4)
+            .onAppear { loadIfNeeded() }
+            .confirmationDialog(
+                "「\(name)」を削除しますか?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("カテゴリなしに分類") { deleteCategory(deleteExpenses: false) }
+                Button("カテゴリと支出をすべて削除", role: .destructive) {
+                    deleteCategory(deleteExpenses: true)
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("このカテゴリを使っている支出を「カテゴリなし」に変えてカテゴリのみ削除するか、支出ごとすべて削除するかを選んでください。")
+            }
         }
     }
 
-    private var iconGrid: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
-        return LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(CategoryDefaults.availableSymbols, id: \.self) { sym in
-                Button {
-                    selectedSymbol = sym
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(selectedSymbol == sym ? previewColor.opacity(0.22) : Color(.tertiarySystemBackground))
-                            .frame(height: 44)
-                        Image(systemName: sym)
-                            .foregroundStyle(selectedSymbol == sym ? previewColor : .primary)
+    // MARK: - Cards
+
+    private var headerCard: some View {
+        VStack(spacing: 18) {
+            CategoryIconView(symbol: selectedSymbol, tint: previewColor, size: 92)
+                .padding(.top, 24)
+                .shadow(color: previewColor.opacity(0.4), radius: 16, x: 0, y: 6)
+            TextField("カテゴリ名", text: $name)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var kindCard: some View {
+        HStack(spacing: 12) {
+            CategoryIconView(symbol: kind.symbol, tint: kind == .income ? .green : .red, size: 36)
+            Text("種別").font(.headline)
+            Spacer()
+            Menu {
+                ForEach(TransactionKind.allCases) { k in
+                    Button {
+                        kind = k
+                    } label: {
+                        HStack {
+                            Text(k.label)
+                            if k == kind { Image(systemName: "checkmark") }
+                        }
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(selectedSymbol == sym ? previewColor : .clear, lineWidth: 1.5)
-                    )
                 }
-                .buttonStyle(.plain)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(kind.label)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption)
+                }
+                .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
+
+    private var colorCard: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 6)
+        return LazyVGrid(columns: columns, spacing: 14) {
+            ForEach(CategoryDefaults.palette, id: \.self) { hex in
+                colorCircle(hex: hex)
+            }
+            customColorPicker
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func colorCircle(hex: String) -> some View {
+        let color = Color(hex: hex) ?? .gray
+        let isSelected = selectedColor == hex
+        return Button {
+            selectedColor = hex
+            customColor = color
+        } label: {
+            ZStack {
+                if isSelected {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.35), lineWidth: 3)
+                        .frame(width: 50, height: 50)
+                }
+                Circle()
+                    .fill(color)
+                    .frame(width: 40, height: 40)
+            }
+            .frame(height: 50)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// パレットの最後にカスタムカラー用の ColorPicker (= 虹色のリング) を置く。
+    private var customColorPicker: some View {
+        let isCustom = !CategoryDefaults.palette.contains(selectedColor)
+        return ZStack {
+            if isCustom {
+                Circle()
+                    .stroke(Color.primary.opacity(0.35), lineWidth: 3)
+                    .frame(width: 50, height: 50)
+            }
+            ColorPicker("", selection: $customColor, supportsOpacity: false)
+                .labelsHidden()
+                .frame(width: 40, height: 40)
+                .onChange(of: customColor) { _, newValue in
+                    selectedColor = newValue.toHex() ?? selectedColor
+                }
+        }
+        .frame(height: 50)
+    }
+
+    private var iconCard: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 6)
+        return LazyVGrid(columns: columns, spacing: 14) {
+            ForEach(CategoryDefaults.availableSymbols, id: \.self) { sym in
+                iconButton(sym)
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func iconButton(_ sym: String) -> some View {
+        let isSelected = selectedSymbol == sym
+        return Button {
+            selectedSymbol = sym
+        } label: {
+            ZStack {
+                if isSelected {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.35), lineWidth: 3)
+                        .frame(width: 50, height: 50)
+                }
+                Circle()
+                    .fill(isSelected ? AnyShapeStyle(previewColor.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .frame(width: 40, height: 40)
+                Image(systemName: sym)
+                    .foregroundStyle(isSelected ? .white : Color.primary)
+                    .font(.callout.weight(.medium))
+            }
+            .frame(height: 50)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var deleteCard: some View {
+        Button(role: .destructive) {
+            showDeleteConfirm = true
+        } label: {
+            Label("カテゴリを削除", systemImage: "trash")
+                .frame(maxWidth: .infinity)
+                .padding(16)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
+    // MARK: - Toolbar circle button helper
+
+    private func circleToolbarButton(systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(Color(.tertiarySystemBackground)))
+        }
+    }
+
+    // MARK: - Lifecycle
 
     private func loadIfNeeded() {
         guard !didLoad else { return }
         didLoad = true
         switch mode {
         case .create:
+            kind = defaultKind
+            if defaultKind == .income {
+                selectedColor = "#34C759"
+                selectedSymbol = "briefcase.fill"
+            }
             customColor = Color(hex: selectedColor) ?? .orange
         case .edit(let category):
             name = category.displayName
             selectedColor = category.displayColorHex
             selectedSymbol = category.displaySymbol
+            kind = category.kind
             customColor = Color(hex: selectedColor) ?? .gray
+
+            origName = name
+            origColor = selectedColor
+            origSymbol = selectedSymbol
         }
     }
 
@@ -175,34 +285,85 @@ struct EditCategoryView: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         switch mode {
         case .create(let record):
+            let pc = PersistenceController.shared
+            let sheetStore = record.objectID.persistentStore
+
             let cat = ExpenseCategory(context: viewContext)
+            if let store = sheetStore {
+                viewContext.assign(cat, to: store)
+            }
+
             cat.id = UUID()
             cat.name = trimmed
             cat.colorHex = selectedColor
             cat.symbol = selectedSymbol
+            cat.kindRaw = kind.rawValue
             cat.isBuiltIn = false
             cat.createdAt = .now
             cat.sortOrder = nextSortOrder(in: record)
             cat.sheet = record
-            PersistenceController.shared.save()
+            pc.save()
             Haptics.success()
             onSave?(cat)
         case .edit(let category):
-            category.name = trimmed
-            category.colorHex = selectedColor
-            category.symbol = selectedSymbol
+            viewContext.refresh(category, mergeChanges: true)
+            if trimmed != origName { category.name = trimmed }
+            if selectedColor != origColor { category.colorHex = selectedColor }
+            if selectedSymbol != origSymbol { category.symbol = selectedSymbol }
             PersistenceController.shared.save()
             Haptics.success()
         }
         dismiss()
     }
 
-    private func deleteCategory() {
-        if case .edit(let category) = mode {
-            viewContext.delete(category)
-            PersistenceController.shared.save()
-            dismiss()
+    /// カテゴリを削除する。
+    /// - Parameter deleteExpenses: `true` ならこのカテゴリを使っている支出もすべて削除。
+    ///   `false` なら支出は残し、`category`/`categoryRaw` を空にして「カテゴリなし」扱いにする。
+    private func deleteCategory(deleteExpenses: Bool) {
+        guard case .edit(let category) = mode else { return }
+        EditCategoryView.deleteCategory(
+            category,
+            deleteExpenses: deleteExpenses,
+            in: viewContext
+        )
+        Haptics.warning()
+        dismiss()
+    }
+
+    /// CategoryListView の swipe 削除と共有する実装。
+    /// `category == self` リレーション一致だけでなく、`categoryRaw` 文字列一致もカバーする。
+    /// ただし他シート / 別 kind に同名カテゴリがあるケースを誤爆しないよう、
+    /// **同一シート + 同一 kind** に限定して `categoryRaw` 一致を引く。
+    static func deleteCategory(_ category: ExpenseCategory,
+                               deleteExpenses: Bool,
+                               in ctx: NSManagedObjectContext) {
+        let categoryName = category.name ?? ""
+        let kindRaw = category.kindRaw ?? TransactionKind.expense.rawValue
+
+        let req = NSFetchRequest<Expense>(entityName: "Expense")
+        if let sheet = category.sheet, !categoryName.isEmpty {
+            req.predicate = NSPredicate(
+                format: "sheet == %@ AND (category == %@ OR (categoryRaw == %@ AND kindRaw == %@))",
+                sheet, category, categoryName, kindRaw
+            )
+        } else {
+            req.predicate = NSPredicate(format: "category == %@", category)
         }
+        let related = (try? ctx.fetch(req)) ?? []
+
+        if deleteExpenses {
+            for e in related { ctx.delete(e) }
+        } else {
+            // category リレーションは deletionRule=Nullify で自動的に nil になるが、
+            // categoryRaw 文字列は残るので明示的にクリアして「未分類」表示にする
+            for e in related {
+                e.categoryRaw = ""
+                e.category = nil
+            }
+        }
+
+        ctx.delete(category)
+        PersistenceController.shared.save()
     }
 
     private func nextSortOrder(in sheet: ExpenseSheet) -> Int32 {

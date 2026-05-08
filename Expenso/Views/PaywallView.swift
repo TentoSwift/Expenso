@@ -67,14 +67,16 @@ struct PaywallView: View {
 
     private var featuresList: some View {
         VStack(spacing: 14) {
-            featureRow(icon: "envelope.fill", title: "メールで招待を送る",
-                       subtitle: "iCloud アカウントを検索して招待")
-            featureRow(icon: "shield.lefthalf.filled", title: "権限付きで招待",
-                       subtitle: "編集可能 / 閲覧のみを切り替え")
-            featureRow(icon: "square.and.arrow.up", title: "リンクで AirDrop / メッセージ送信",
-                       subtitle: "メール以外のアプリでも招待を共有")
-            featureRow(icon: "person.2.fill", title: "招待相手は無料で参加",
-                       subtitle: "招待された側に課金は不要")
+            featureRow(icon: "person.2.fill", title: "シートを共有",
+                       subtitle: "家族・友人を招待して同じシートに記録 (招待相手は無料)")
+            featureRow(icon: "rectangle.stack.fill.badge.plus", title: "シートを無制限に作成",
+                       subtitle: "無料は 5 枚まで。Premium で無制限")
+            featureRow(icon: "tag.fill", title: "カテゴリを無制限に追加",
+                       subtitle: "無料は 1 シート 20 まで。共有相手の誰か 1 人が Premium ならそのシートは全員無制限")
+            featureRow(icon: "doc.text", title: "CSV エクスポート",
+                       subtitle: "Excel / Numbers で開けるバックアップ")
+            featureRow(icon: "doc.richtext", title: "PDF レポート",
+                       subtitle: "月別サマリ + カテゴリ別内訳の集計レポート")
         }
     }
 

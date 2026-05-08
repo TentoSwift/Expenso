@@ -7,13 +7,11 @@ import SwiftUI
 import SwiftData
 
 struct SettingsView: View {
-    @StateObject private var profile = UserProfileStore.shared
     @StateObject private var pm = PurchaseManager.shared
     @StateObject private var fx = FXRatesService.shared
     @Environment(\.managedObjectContext) private var viewContext
     @State private var showPaywall: Bool = false
     @State private var showEraseConfirm: Bool = false
-    @State private var showProfileEditor: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -53,40 +51,6 @@ struct SettingsView: View {
                             }
                         }
                     }
-                }
-
-                Section {
-                    Button {
-                        showProfileEditor = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                Circle()
-                                    .fill(profile.tint.gradient)
-                                    .frame(width: 56, height: 56)
-                                Image(systemName: profile.iconSymbol)
-                                    .font(.title3)
-                                    .foregroundStyle(.white)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile.resolvedDisplayName)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text("プロフィールを編集")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                } header: {
-                    Text("プロフィール")
-                } footer: {
-                    Text("アカウント全体で使われるアイコンと名前です。新しい支出を追加した時の支払者の初期値にも使われます。")
                 }
 
                 Section("カテゴリ") {
@@ -186,6 +150,13 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("デバッグ") {
+                    NavigationLink("閉じる確認ダイアログ サンプル") {
+                        DismissConfirmDemoView()
+                            .navigationTitle("Dismiss Confirm Demo")
+                    }
+                }
+
                 Section {
                     Button(role: .destructive) {
                         showEraseConfirm = true
@@ -202,11 +173,8 @@ struct SettingsView: View {
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
             }
-            .sheet(isPresented: $showProfileEditor) {
-                UserProfileEditView()
-            }
             .task {
-                profile.ensureSelfMemberExists(in: viewContext)
+                UserProfileStore.shared.ensureSelfMemberExists(in: viewContext)
             }
             .onAppear {
                 if ProcessInfo.processInfo.environment["EXPENSO_DEMO"] == "paywall" {

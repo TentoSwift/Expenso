@@ -73,29 +73,26 @@ final class PersistenceController {
             }
         }
 
-        // 既存ストアが現在のモデル/configuration と互換でなければ破棄して作り直す。
-        // (configuration 名の変更や entity セット変更で発生する
-        //  "The model configuration used to open the store is incompatible..." エラーを自動回復)
-        if !inMemory {
-            // 前回の save() で configuration mismatch が起きた場合は無条件で wipe する。
-            // (load 時のメタデータ比較では取りこぼされるケースの保険)
-            if UserDefaults.standard.bool(forKey: Self.storeNeedsResetKey) {
-                for description in container.persistentStoreDescriptions {
-                    if let url = description.url {
-                        try? Self.deleteSQLiteFiles(at: url)
-                    }
-                }
-                UserDefaults.standard.removeObject(forKey: Self.storeNeedsResetKey)
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .expensoStoreReset,
-                        object: nil,
-                        userInfo: ["message": "前回の保存エラーを検出したためデータベースをリセットしました。"]
-                    )
+        // 前回の save() で configuration mismatch (= entity セット変更等で本当に互換不能) が
+        // 起きていた場合だけ、無条件で wipe する。
+        // 通常のスキーマ変更 (新しい optional 属性追加など) は Core Data の lightweight migration
+        // (`shouldMigrateStoreAutomatically + shouldInferMappingModelAutomatically`) に任せる。
+        // 起動時の version-hash 比較で先回り wipe すると、互換可能な変更でも一律にユーザーデータ
+        // (= 共有や CKShare メタデータ含む) を吹き飛ばしてしまうため行わない。
+        if !inMemory, UserDefaults.standard.bool(forKey: Self.storeNeedsResetKey) {
+            for description in container.persistentStoreDescriptions {
+                if let url = description.url {
+                    try? Self.deleteSQLiteFiles(at: url)
                 }
             }
-            Self.resetIncompatibleStoresIfNeeded(model: container.managedObjectModel,
-                                                 descriptions: container.persistentStoreDescriptions)
+            UserDefaults.standard.removeObject(forKey: Self.storeNeedsResetKey)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .expensoStoreReset,
+                    object: nil,
+                    userInfo: ["message": "前回の保存エラーを検出したためデータベースをリセットしました。"]
+                )
+            }
         }
 
         let privateURL = baseDescription.url
@@ -127,8 +124,10 @@ final class PersistenceController {
 
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-
-        try? container.viewContext.setQueryGenerationFrom(.current)
+        // setQueryGenerationFrom(.current) は付けない。これを付けると viewContext が起動時点の
+        // レコード集合に pin され、CloudKit が import した他端末の Expense / Sheet 等が
+        // automaticallyMergesChangesFromParent を経ても auto-advance されず、再起動するまで
+        // 見えなくなる。pinning 無しでも auto-merge は問題なく機能する。
 
         // 一度きりの seed/migration はリビジョン番号でガード。次回起動以降は走らせない。
         runOneTimeMigrationsIfNeeded()
@@ -171,7 +170,6 @@ final class PersistenceController {
         m.id = UUID()
         m.name = displayName.isEmpty ? "自分" : displayName
         m.colorHex = "#5B8DEF"
-        m.symbol = "person.fill"
         m.sortOrder = 0
         m.createdAt = .now
         try? ctx.save()
@@ -194,8 +192,8 @@ final class PersistenceController {
         if didChange { try? ctx.save() }
     }
 
-    /// シート専用のデフォルトカテゴリ10個を作成する。新規シート作成時、または
-    /// 既存シートにカテゴリが無い場合の補填として呼ぶ。
+    /// シート専用のデフォルトカテゴリ (支出 + 収入) を作成する。
+    /// 新規シート作成時、または既存シートにカテゴリが無い場合の補填として呼ぶ。
     static func seedDefaultCategories(for sheet: ExpenseSheet, in ctx: NSManagedObjectContext) {
         for (i, seed) in CategoryDefaults.seeds.enumerated() {
             let cat = ExpenseCategory(context: ctx)
@@ -203,7 +201,28 @@ final class PersistenceController {
             cat.name = seed.name
             cat.colorHex = seed.colorHex
             cat.symbol = seed.symbol
+            cat.kindRaw = seed.kind.rawValue
             cat.sortOrder = Int32(i)
+            cat.isBuiltIn = true
+            cat.createdAt = .now
+            cat.sheet = sheet
+        }
+    }
+
+    /// 既存シートに収入カテゴリが無ければ補填する (旧データ移行用)。
+    static func ensureIncomeSeedCategories(for sheet: ExpenseSheet, in ctx: NSManagedObjectContext) {
+        let existing = (sheet.categories as? Set<ExpenseCategory>) ?? []
+        let hasIncome = existing.contains(where: { ($0.kindRaw ?? "") == "income" })
+        if hasIncome { return }
+        let baseSort = (existing.map(\.sortOrder).max() ?? -1) + 1
+        for (i, seed) in CategoryDefaults.incomeSeeds.enumerated() {
+            let cat = ExpenseCategory(context: ctx)
+            cat.id = UUID()
+            cat.name = seed.name
+            cat.colorHex = seed.colorHex
+            cat.symbol = seed.symbol
+            cat.kindRaw = seed.kind.rawValue
+            cat.sortOrder = Int32(i) + baseSort
             cat.isBuiltIn = true
             cat.createdAt = .now
             cat.sheet = sheet
@@ -223,6 +242,11 @@ final class PersistenceController {
             if existing.isEmpty {
                 Self.seedDefaultCategories(for: sheet, in: ctx)
                 didChange = true
+            } else {
+                // 旧データに収入カテゴリが無ければ補填
+                let beforeCount = existing.count
+                Self.ensureIncomeSeedCategories(for: sheet, in: ctx)
+                if (sheet.categories as? Set<ExpenseCategory>)?.count != beforeCount { didChange = true }
             }
 
             // シート内のカテゴリ名一致で Expense を再リンク
@@ -461,8 +485,8 @@ final class PersistenceController {
         family.createdAt = .now
         Self.seedDefaultCategories(for: family, in: ctx)
         // Member はアカウント単位 (グローバル) なので両シートで共通に作る
-        _ = makeMember(name: "自分", color: "#5B8DEF", symbol: "person.fill", sort: 0, ctx: ctx)
-        _ = makeMember(name: "パートナー", color: "#FF2D55", symbol: "heart.fill", sort: 1, ctx: ctx)
+        _ = makeMember(name: "自分", color: "#5B8DEF", sort: 0, ctx: ctx)
+        _ = makeMember(name: "パートナー", color: "#FF2D55", sort: 1, ctx: ctx)
 
         let trip = ExpenseSheet(context: ctx)
         trip.name = "京都旅行"
@@ -498,12 +522,11 @@ final class PersistenceController {
         try? ctx.save()
     }
 
-    private func makeMember(name: String, color: String, symbol: String, sort: Int32, ctx: NSManagedObjectContext) -> Member {
+    private func makeMember(name: String, color: String, sort: Int32, ctx: NSManagedObjectContext) -> Member {
         let m = Member(context: ctx)
         m.id = UUID()
         m.name = name
         m.colorHex = color
-        m.symbol = symbol
         m.sortOrder = sort
         m.createdAt = .now
         return m

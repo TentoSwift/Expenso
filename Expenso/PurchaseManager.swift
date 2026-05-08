@@ -6,6 +6,7 @@
 import Foundation
 import StoreKit
 import Combine
+import CoreData
 
 @MainActor
 final class PurchaseManager: ObservableObject {
@@ -71,7 +72,7 @@ final class PurchaseManager: ObservableObject {
     }
 
     init() {
-        updateListener = Task { [weak self] in
+        updateListener = Task { @MainActor [weak self] in
             await self?.refreshEntitlements()
             await self?.listenForUpdates()
         }
@@ -154,32 +155,12 @@ final class PurchaseManager: ObservableObject {
         let nowPremium = !ids.intersection(Self.premiumProductIDs).isEmpty
         UserDefaults.standard.set(nowPremium, forKey: Self.isPremiumKey)
 
+        // 期限切れ検知時は通知だけ。auto-revoke / Core Data 書き込みは
+        // CloudKit op (招待中の persistUpdatedShare) と main actor で競合して
+        // 「招待を準備中」が固まる原因になっていたため、Chefie 仕様に揃えて
+        // ここでは触らない方針に戻す。
         if wasPremium && !nowPremium {
-            // 今回切れた → 解除フラグを立てて、その場で 1 回試す
-            UserDefaults.standard.set(true, forKey: Self.sharesRevocationPendingKey)
-            await handlePremiumExpired()
-        } else if !nowPremium {
-            // 非 Premium 状態で起動するたびに、自分が所有する CKShare の状態を実際に確認する。
-            // `wasPremium` フラグの取りこぼしや UserDefaults キャッシュのズレに依存しないよう、
-            // CKShare に他参加者または公開リンクが残っていたら必ず解除する。
-            await ensureNoActiveSharesIfFree()
-        }
-    }
-
-    /// 非 Premium のままになっている共有が CloudKit に残っていないかを実態ベースで確認し、
-    /// 残っていれば revoke する。失敗したらフラグを残し次回起動でリトライ。
-    private func ensureNoActiveSharesIfFree() async {
-        let pendingFlag = UserDefaults.standard.bool(forKey: Self.sharesRevocationPendingKey)
-        let hasActive = await ShareCoordinator.shared.hasActiveOwnedShares()
-        guard pendingFlag || hasActive else { return }
-
-        let success = await ShareCoordinator.shared.revokeAllOwnedShares()
-        if success {
-            UserDefaults.standard.removeObject(forKey: Self.sharesRevocationPendingKey)
-            // ユーザーに何が起きたかを通知 (起動時の自動解除ケース)
             NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
-        } else {
-            UserDefaults.standard.set(true, forKey: Self.sharesRevocationPendingKey)
         }
     }
 
@@ -191,16 +172,61 @@ final class PurchaseManager: ObservableObject {
             }
         }
     }
-
-    private func handlePremiumExpired() async {
-        let success = await ShareCoordinator.shared.revokeAllOwnedShares()
-        if success {
-            UserDefaults.standard.removeObject(forKey: Self.sharesRevocationPendingKey)
-        }
-        NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
-    }
 }
 
 extension Notification.Name {
     static let expensoPremiumExpired = Notification.Name("ExpensoPremiumExpired")
+}
+
+// MARK: - Free-tier gating
+
+/// 無料プランの上限値。Premium がいれば常に無効化される。
+enum FreeTierLimits {
+    /// 1 シートあたりのカテゴリ最大数 (デフォルト seed 15 + 5 のゆとり)
+    static let categoriesPerSheet: Int = 20
+    /// 自分が「所有」できるシートの最大数 (= 自分が作成したシートのみカウント、
+    /// 共有受け入れシートは数えない)
+    static let ownedSheets: Int = 5
+}
+
+extension PurchaseManager {
+    /// 自分自身が Premium なら true。propagatePremiumFlag が UserDefaults に
+    /// キャッシュしているのでメインスレッド外でも参照できる。
+    static var isCurrentUserPremium: Bool { isPremiumCached }
+
+    /// 指定シートに新しいカテゴリを 1 つ追加できるか。
+    /// 上限は `FreeTierLimits.categoriesPerSheet`。
+    /// シート上に Premium が 1 人でもいれば (= ownerIsPremium or
+    /// 任意の participantProfile.isPremium) 上限を無視できる。
+    static func canAddCategory(to sheet: ExpenseSheet) -> Bool {
+        if isCurrentUserPremium { return true }
+        if sheet.ownerIsPremium { return true }
+        if let profiles = sheet.participantProfiles as? Set<ParticipantProfile>,
+           profiles.contains(where: { $0.isPremium }) {
+            return true
+        }
+        let count = (sheet.categories as? Set<ExpenseCategory>)?.count ?? 0
+        return count < FreeTierLimits.categoriesPerSheet
+    }
+
+    /// 新しい (= 自分所有の) シートを作成できるかの 2 値ゲート。
+    enum SheetCreationGate {
+        case allowed
+        case overLimit
+    }
+
+    @MainActor
+    static func sheetCreationGate() -> SheetCreationGate {
+        if isCurrentUserPremium { return .allowed }
+        let ctx = PersistenceController.shared.container.viewContext
+        let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        let sheets = (try? ctx.fetch(req)) ?? []
+        let owned = sheets.filter { $0.isOwnedByCurrentUser }.count
+        return owned < FreeTierLimits.ownedSheets ? .allowed : .overLimit
+    }
+
+    @MainActor
+    static func canCreateOwnedSheet() -> Bool {
+        sheetCreationGate() == .allowed
+    }
 }

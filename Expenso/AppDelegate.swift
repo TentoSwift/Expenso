@@ -55,6 +55,12 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
                         userInfo: ["message": "共有の受諾に失敗しました: \(error.localizedDescription)"]
                     )
                 } else {
+                    // 受諾後は新シートに自分の ParticipantProfile を書き込み、共有相手に名前/画像を見せる。
+                    // ensureProfileForAllSheets は既に PP がある既存シートには触れない (per-sheet 値を保護)。
+                    Task { @MainActor in
+                        await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                        UserProfileStore.shared.ensureProfileForAllSheets(in: pc.container.viewContext)
+                    }
                     NotificationCenter.default.post(
                         name: .expensoShareAccepted,
                         object: nil,

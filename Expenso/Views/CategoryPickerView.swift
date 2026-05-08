@@ -9,21 +9,34 @@ import CoreData
 struct CategoryPickerView: View {
     @Binding var selected: ExpenseCategory?
     let record: ExpenseSheet
+    let kind: TransactionKind
     @Environment(\.dismiss) private var dismiss
 
     @FetchRequest private var categories: FetchedResults<ExpenseCategory>
 
     @State private var showingNew = false
 
-    init(selected: Binding<ExpenseCategory?>, record: ExpenseSheet) {
+    init(selected: Binding<ExpenseCategory?>, record: ExpenseSheet, kind: TransactionKind = .expense) {
         self._selected = selected
         self.record = record
+        self.kind = kind
+        // kindRaw 未設定の旧カテゴリは支出扱いに含める
+        let predicate: NSPredicate = {
+            if kind == .expense {
+                return NSPredicate(
+                    format: "sheet == %@ AND (kindRaw == %@ OR kindRaw == nil OR kindRaw == '')",
+                    record, kind.rawValue
+                )
+            } else {
+                return NSPredicate(format: "sheet == %@ AND kindRaw == %@", record, kind.rawValue)
+            }
+        }()
         _categories = FetchRequest<ExpenseCategory>(
             sortDescriptors: [
                 NSSortDescriptor(keyPath: \ExpenseCategory.sortOrder, ascending: true),
                 NSSortDescriptor(keyPath: \ExpenseCategory.createdAt, ascending: true)
             ],
-            predicate: NSPredicate(format: "sheet == %@", record),
+            predicate: predicate,
             animation: .default
         )
     }
@@ -36,13 +49,7 @@ struct CategoryPickerView: View {
                     dismiss()
                 } label: {
                     HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(cat.tint.opacity(0.18))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: cat.displaySymbol)
-                                .foregroundStyle(cat.tint)
-                        }
+                        CategoryIconView(category: cat, size: 36)
                         Text(cat.displayName)
                             .foregroundStyle(.primary)
                         Spacer()
@@ -66,7 +73,7 @@ struct CategoryPickerView: View {
         .navigationTitle("カテゴリを選択")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingNew) {
-            EditCategoryView(mode: .create(record: record)) { newCat in
+            EditCategoryView(mode: .create(record: record), defaultKind: kind) { newCat in
                 selected = newCat
                 dismiss()
             }

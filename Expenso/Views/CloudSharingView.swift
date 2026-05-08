@@ -96,6 +96,7 @@ struct CloudSharingView: View {
             groupHeader
             if let share = existingShare {
                 participantsSection(share: share)
+                shareIDSection(share: share)
             }
             inviteSection
             shareLinkSection
@@ -122,40 +123,10 @@ struct CloudSharingView: View {
                 Text("このシートはオーナーから共有されています。シートのデータはオーナー側と同期され、あなたは追加・編集ができます。")
             }
 
-            if let share = existingShare, !share.participants.isEmpty {
+            // premiumForm (オーナー画面) と同じ条件・同じレンダラで参加者を表示する。
+            if let share = existingShare {
                 participantsSection(share: share)
-            } else {
-                Section {
-                    HStack(spacing: 10) {
-                        if isLoadingShare {
-                            ProgressView()
-                            Text("共有情報を取得中...")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Image(systemName: "person.2.slash")
-                                .foregroundStyle(.secondary)
-                            Text(existingShare == nil
-                                 ? "共有情報をまだ取得できていません"
-                                 : "他の参加者はまだいません")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                Task { await refreshShareAsync() }
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(isLoadingShare)
-                        }
-                    }
-                    .font(.subheadline)
-                } header: {
-                    Text("参加者")
-                } footer: {
-                    if existingShare == nil {
-                        Text("CloudKit との同期にしばらく時間がかかる場合があります。引き下げて更新するか、再読み込みボタンをタップしてください。")
-                    }
-                }
+                shareIDSection(share: share)
             }
 
             Section {
@@ -206,10 +177,10 @@ struct CloudSharingView: View {
     private func leaveSharedSheet() async {
         isProcessing = true
         errorMessage = nil
-        let ctx = PersistenceController.shared.container.viewContext
-        ctx.delete(record)
         do {
-            try ctx.save()
+            // ctx.delete(record) ではなく purge を使う。
+            // delete だとオーナーや他参加者の側のシートまで消えてしまう。
+            try await ShareCoordinator.shared.leaveSharedSheet(record)
             Haptics.warning()
             dismiss()
         } catch {
@@ -266,39 +237,67 @@ struct CloudSharingView: View {
         if !displayed.isEmpty {
             Section {
                 ForEach(Array(displayed.enumerated()), id: \.offset) { _, participant in
-                    ParticipantRow(participant: participant, isOwnerView: isOwner) { permission in
+                    ParticipantRow(
+                        participant: participant,
+                        sheet: record,
+                        isOwnerView: isOwner
+                    ) { permission in
                         await update(participant: participant, share: share, to: permission)
                     } onRemove: {
                         await removeParticipant(participant, from: share)
                     }
                 }
             } header: {
-                HStack {
-                    Text("参加者")
-                    Spacer()
-                    Button {
-                        Task { await fetchAllParticipantProfiles(share) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                }
+                Text("参加者")
             }
             .id(participantsRefresh)
-            .task(id: share.url) {
-                await fetchAllParticipantProfiles(share)
-            }
         }
     }
 
     private func fetchAllParticipantProfiles(_ share: CKShare) async {
-        let recordNames = share.participants
-            .filter { $0.acceptanceStatus != .pending }
-            .compactMap { $0.userIdentity.userRecordID?.recordName }
-            .filter { !$0.isEmpty && $0 != "_defaultOwner_" && $0 != "__defaultOwner__" }
-        guard !recordNames.isEmpty else { return }
-        await RemoteProfileCache.shared.fetch(recordNames) // 強制再取得
+        // ParticipantProfile は Core Data + CloudKit Sharing 経由で自動同期されるため、
+        // 明示的なプロフェッチは不要 (互換のため空実装で残す)。
+    }
+
+    @ViewBuilder
+    private func shareIDSection(share: CKShare) -> some View {
+        let recordName = share.recordID.recordName
+        let zoneName = share.recordID.zoneID.zoneName
+        let ownerName = share.recordID.zoneID.ownerName
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                row(label: "Record", value: recordName)
+                row(label: "Zone", value: zoneName)
+                row(label: "Owner", value: ownerName)
+            }
+            Button {
+                UIPasteboard.general.string = recordName
+                withAnimation { showCopiedToast = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    withAnimation { showCopiedToast = false }
+                }
+            } label: {
+                Label("Record ID をコピー", systemImage: "doc.on.doc")
+                    .font(.caption)
+            }
+        } header: {
+            Text("CKShare ID")
+        }
+    }
+
+    private func row(label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .foregroundStyle(.primary)
+        }
     }
 
     private var inviteSection: some View {
@@ -388,9 +387,9 @@ struct CloudSharingView: View {
             Text("リンクで共有")
         } footer: {
             if resolvedURL == nil {
-                Text("リンクを生成すると AirDrop / メッセージなどで誰にでも送れます。リンクから参加した相手は自動的にこのシートに加わります。")
+                Text("リンクを生成して、上で招待した相手に AirDrop / メッセージ等で送れます。招待されていない人がリンクをタップしても参加できません。")
             } else {
-                Text("リンクから参加した相手は自動的にこのシートに加わります (Apple ID が必要)。")
+                Text("このリンクは上で招待した相手だけが使えます (Apple ID 必須)。招待されていない人がタップしても参加できません。")
             }
         }
     }
@@ -445,30 +444,9 @@ struct CloudSharingView: View {
             )
             existingShare = result.share
             pendingURL = result.url
-
-            let data = MailData(
-                recipient: trimmedEmail,
-                subject: "Expenso「\(record.displayName)」への招待",
-                body: """
-                Expenso のシート「\(record.displayName)」に招待されました。
-
-                権限: \(permission == .readWrite ? "編集可能" : "閲覧のみ")
-
-                下のリンクをタップしてシートに参加してください。
-
-                \(result.url.absoluteString)
-
-                — Expenso
-                """
-            )
-            if MFMailComposeViewController.canSendMail() {
-                mailData = data
-            } else {
-                showMailUnavailable = true
-            }
-
             email = ""
             participantsRefresh += 1
+            Haptics.success()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -524,11 +502,12 @@ struct CloudSharingView: View {
 
 private struct ParticipantRow: View {
     let participant: CKShare.Participant
+    @ObservedObject var sheet: ExpenseSheet
     var isOwnerView: Bool = true
     let onPermissionChange: (CKShare.ParticipantPermission) async -> Void
     let onRemove: () async -> Void
 
-    @ObservedObject private var cache = RemoteProfileCache.shared
+    @ObservedObject private var userProfile = UserProfileStore.shared
 
     private var recordName: String? {
         guard let rn = participant.userIdentity.userRecordID?.recordName,
@@ -538,13 +517,39 @@ private struct ParticipantRow: View {
         return rn
     }
 
+    /// この行が現在の iCloud ユーザー (= 自分) を表すか。
+    /// CKShare の currentUserParticipant と同じ判定になるよう userRecordName で比較する。
+    /// 自分がオーナーの場合、CKShare 上の recordName は `_defaultOwner_` プレースホルダ
+    /// になるため、role == .owner + sheet が自分の所有 もケースとして拾う。
+    private var isSelf: Bool {
+        if let myRN = userProfile.userRecordName, !myRN.isEmpty, recordName == myRN {
+            return true
+        }
+        if participant.role == .owner, sheet.isOwnedByCurrentUser {
+            return true
+        }
+        return false
+    }
+
+    /// 表示用 recordName。`_defaultOwner_` プレースホルダの場合は `UserProfileStore` に
+    /// キャッシュされている実 recordName をフォールバックに使う。
+    private var displayedRecordName: String? {
+        if let rn = recordName { return rn }
+        if isSelf, let myRN = userProfile.userRecordName, !myRN.isEmpty {
+            return myRN
+        }
+        return nil
+    }
+
     private var emailAddress: String? {
         participant.userIdentity.lookupInfo?.emailAddress
     }
 
-    private var cachedProfile: RemoteProfileCache.CachedProfile? {
-        guard let rn = recordName else { return nil }
-        return cache.profile(for: rn)
+    /// このシート配下に居る、この participant に対応する ParticipantProfile を引く。
+    private var participantProfile: ParticipantProfile? {
+        guard let rn = recordName,
+              let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        return profiles.first(where: { $0.recordName == rn })
     }
 
     private var isAccepted: Bool {
@@ -552,11 +557,15 @@ private struct ParticipantRow: View {
     }
 
     private var primaryText: String {
-        // 参加済みは Public DB のプロフィール表示名を最優先
-        if isAccepted, let cached = cachedProfile, let n = cached.displayName, !n.isEmpty {
+        // 自分の行は UserProfileStore からローカルプロフィールを採用する。
+        // ParticipantProfile は他のユーザー向けに自分のプロフィールを propagate する仕組みであり、
+        // 自分自身の sheet では空のことがあるため。
+        if isSelf {
+            return userProfile.resolvedDisplayName
+        }
+        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return n
         }
-        // 招待中はメールアドレス
         if participant.acceptanceStatus == .pending, let email = emailAddress {
             return email
         }
@@ -571,28 +580,26 @@ private struct ParticipantRow: View {
     }
 
     private var secondaryText: String? {
-        // 参加済みでプロフィール取得済み: メールアドレスを補助情報として表示
-        if isAccepted, cachedProfile?.displayName?.isEmpty == false {
+        if isSelf {
+            return emailAddress
+        }
+        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
             return emailAddress
         }
         return nil
     }
 
-    private var avatarColor: Color {
-        if isAccepted, let cached = cachedProfile, let hex = cached.colorHex, let c = Color(hex: hex) {
-            return c
+    private var avatarColorHex: String {
+        if isSelf, let hex = userProfile.avatarBgColorHex, !hex.isEmpty {
+            return hex
+        }
+        if isAccepted, let hex = participantProfile?.colorHex, !hex.isEmpty {
+            return hex
         }
         switch participant.role {
-        case .owner: return .indigo
-        default: return participant.acceptanceStatus == .pending ? .orange : .gray
+        case .owner: return "#5856D6"
+        default: return participant.acceptanceStatus == .pending ? "#FF9500" : "#8E8E93"
         }
-    }
-
-    private var avatarSymbol: String {
-        if isAccepted, let cached = cachedProfile, let s = cached.iconSymbol, !s.isEmpty {
-            return s
-        }
-        return participant.acceptanceStatus == .pending ? "envelope.fill" : "person.fill"
     }
 
     private var statusText: String {
@@ -618,13 +625,23 @@ private struct ParticipantRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(avatarColor.gradient)
-                    Image(systemName: avatarSymbol)
-                        .foregroundStyle(.white)
-                        .font(.callout.weight(.semibold))
+                if isSelf {
+                    AvatarView(
+                        photoData: userProfile.photoData,
+                        displayName: primaryText,
+                        colorHex: avatarColorHex,
+                        size: 40
+                    )
+                } else if let pp = participantProfile {
+                    ObservedParticipantProfileAvatar(profile: pp, size: 40)
+                } else {
+                    AvatarView(
+                        photoData: nil,
+                        displayName: primaryText,
+                        colorHex: avatarColorHex,
+                        size: 40
+                    )
                 }
-                .frame(width: 40, height: 40)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
@@ -646,6 +663,14 @@ private struct ParticipantRow: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if let rn = displayedRecordName {
+                        Text(rn)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
                 }
                 Spacer()
             }
@@ -675,11 +700,6 @@ private struct ParticipantRow: View {
             }
         }
         .padding(.vertical, 4)
-        .task(id: recordName) {
-            if let rn = recordName, isAccepted {
-                await cache.fetchIfStale([rn])
-            }
-        }
     }
 }
 

@@ -12,6 +12,9 @@ struct StatsView: View {
 
     @State private var selectedMonth: Date = .now
     @State private var selectedKind: TransactionKind = .expense
+    @State private var insights: [ResolvedInsight]?
+    @State private var isGeneratingInsights: Bool = false
+    @State private var insightsError: String?
 
     private var allExpenses: [Expense] {
         ((record.expenses as? Set<Expense>) ?? []).sorted {
@@ -69,8 +72,11 @@ struct StatsView: View {
 
     private struct PayerSummary: Identifiable {
         let name: String
+        let member: Member?
+        let participantProfile: ParticipantProfile?
+        let colorHex: String
+        let photoData: Data?
         let tint: Color
-        let symbol: String
         let total: Decimal
         let count: Int
         var id: String { name }
@@ -83,14 +89,18 @@ struct StatsView: View {
             exp.paidBy?.isEmpty == false ? exp.paidBy! : "未指定"
         }
         return grouped.map { (name, list) in
-            let resolved = list.first?.resolvedPayer
+            let resolvedMember = list.first?.resolvedPayer
+            let resolvedPP = list.first?.resolvedParticipantProfile
             let total = list.reduce(Decimal(0)) { acc, e in
                 acc + (fx.convert(e.amountDecimal, from: e.resolvedCurrencyCode, to: target) ?? e.amountDecimal)
             }
             return PayerSummary(
                 name: name,
-                tint: resolved?.tint ?? .secondary,
-                symbol: resolved?.displaySymbol ?? "person.fill",
+                member: resolvedMember,
+                participantProfile: resolvedPP,
+                colorHex: resolvedMember?.displayColorHex ?? resolvedPP?.colorHex ?? "#8E8E93",
+                photoData: resolvedMember?.photoData ?? resolvedPP?.photoData,
+                tint: resolvedMember?.tint ?? .secondary,
                 total: total,
                 count: list.count
             )
@@ -109,7 +119,7 @@ struct StatsView: View {
             return CategorySummary(
                 name: key,
                 tint: value.first?.categoryTint ?? .gray,
-                symbol: value.first?.categorySymbol ?? "ellipsis.circle",
+                symbol: value.first?.categorySymbol ?? "list.bullet",
                 total: total,
                 count: value.count
             )
@@ -130,6 +140,7 @@ struct StatsView: View {
                 monthPicker
                 summaryCard
                 if !byCategory.isEmpty {
+                    insightsSection
                     dailyChartSection
                     chartSection
                     breakdownSection
@@ -146,6 +157,16 @@ struct StatsView: View {
             }
             .padding()
         }
+        .task(id: insightsKey) {
+            await regenerateInsights()
+        }
+    }
+
+    /// 月 + 種別 + データ件数で識別。月変更や種別切替で再生成。
+    private var insightsKey: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMM"
+        return "\(f.string(from: selectedMonth))-\(selectedKind.rawValue)-\(monthlyExpenses.count)"
     }
 
     private var kindPicker: some View {
@@ -218,6 +239,200 @@ struct StatsView: View {
                 .foregroundStyle(isSelected ? color : .primary)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Insights (FoundationModels)
+
+    @ViewBuilder
+    private var insightsSection: some View {
+        // FoundationModels が利用できない端末ではセクションごと隠す
+        if StatsInsightsGenerator.isAvailable {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("今月の気づき", systemImage: "sparkles")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isGeneratingInsights {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button {
+                        Task { await regenerateInsights(force: true) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isGeneratingInsights)
+                }
+
+                if let insights, !insights.isEmpty {
+                    // ストリーミング中もこの分岐に入って、生成済みカードから順に出す
+                    VStack(spacing: 8) {
+                        ForEach(insights) { insight in
+                            insightCard(insight)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                } else if isGeneratingInsights {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("分析中…").foregroundStyle(.secondary).font(.caption)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                    )
+                } else if let err = insightsError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                        )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func insightCard(_ insight: ResolvedInsight) -> some View {
+        let (icon, tint): (String, Color) = {
+            switch insight.severity {
+            case .positive: return ("checkmark.circle.fill", .green)
+            case .warning:  return ("exclamationmark.triangle.fill", .orange)
+            case .info:     return ("lightbulb.fill", Color.accentColor)
+            }
+        }()
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+                .font(.title3)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(insight.title.asAttributedMarkdown)
+                    .font(.subheadline.weight(.semibold))
+                Text(insight.body.asAttributedMarkdown)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(tint.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    /// 統計データから context を組み立てて LLM を呼ぶ。
+    /// ストリーミングで部分応答を受け取り、出来たものから順に画面に表示する。
+    /// - Parameter force: `true` ならすでに insights があっても再生成する (refresh ボタン用)。
+    @MainActor
+    private func regenerateInsights(force: Bool = false) async {
+        guard StatsInsightsGenerator.isAvailable else {
+            insights = nil
+            return
+        }
+        guard !monthlyExpenses.isEmpty else {
+            insights = nil
+            return
+        }
+        if !force, isGeneratingInsights { return }
+
+        isGeneratingInsights = true
+        insightsError = nil
+        insights = nil
+
+        let context = buildInsightsContext()
+        let result = await StatsInsightsGenerator.generate(context: context) { partial in
+            // partial が来るたびに UI を更新 (= ストリーミング表示)
+            withAnimation(.easeOut(duration: 0.15)) {
+                insights = partial.isEmpty ? nil : partial
+            }
+        }
+        isGeneratingInsights = false
+        if let result, !result.isEmpty {
+            insights = result
+        } else if insights == nil {
+            insightsError = "気づきを生成できませんでした"
+        }
+    }
+
+    private func buildInsightsContext() -> StatsInsightsGenerator.Context {
+        let cal = Calendar.current
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "yyyy年M月"
+        let monthLabel = f.string(from: selectedMonth)
+
+        let prevMonth = cal.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
+        let prevExpenses = filteredExpenses.filter {
+            cal.isDate($0.date ?? .distantPast, equalTo: prevMonth, toGranularity: .month)
+        }
+        let prevByCategory: [String: Decimal] = {
+            let fx = FXRatesService.shared
+            let target = primaryCurrencyCode
+            return Dictionary(grouping: prevExpenses) { $0.categoryDisplayName }
+                .mapValues { list in
+                    list.reduce(Decimal(0)) { acc, e in
+                        acc + (fx.convert(e.amountDecimal, from: e.resolvedCurrencyCode, to: target) ?? e.amountDecimal)
+                    }
+                }
+        }()
+
+        let categoryRows: [StatsInsightsGenerator.Context.CategoryRow] = byCategory.map { c in
+            StatsInsightsGenerator.Context.CategoryRow(
+                name: c.name,
+                amount: c.total,
+                count: c.count,
+                prevAmount: prevByCategory[c.name]
+            )
+        }
+
+        let payerRows: [StatsInsightsGenerator.Context.PayerRow] = byPayer.map { p in
+            StatsInsightsGenerator.Context.PayerRow(name: p.name, amount: p.total, count: p.count)
+        }
+
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "ja_JP")
+        dayFormatter.dateFormat = "yyyy/MM/dd"
+        let topDays: [StatsInsightsGenerator.Context.DayRow] = dailyTotals
+            .filter { $0.total > 0 }
+            .sorted { $0.total > $1.total }
+            .prefix(3)
+            .map { row in
+                let count = monthlyExpenses.filter {
+                    cal.isDate($0.date ?? .distantPast, inSameDayAs: row.date)
+                }.count
+                return StatsInsightsGenerator.Context.DayRow(
+                    dateLabel: dayFormatter.string(from: row.date),
+                    amount: row.total,
+                    count: count
+                )
+            }
+
+        return StatsInsightsGenerator.Context(
+            monthLabel: monthLabel,
+            kindLabel: selectedKind.label,
+            currencyCode: primaryCurrencyCode,
+            totalAmount: totalAmount,
+            totalCount: monthlyExpenses.count,
+            previousMonthTotal: previousMonthTotal,
+            previousMonthCount: prevExpenses.count,
+            categoryRows: categoryRows,
+            payerRows: payerRows,
+            topDays: topDays
+        )
     }
 
     private var monthPicker: some View {
@@ -346,18 +561,18 @@ struct StatsView: View {
 
     private var payerBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("支払者別")
+            Text("\(selectedKind.partyLabel)別")
                 .font(.headline)
             ForEach(byPayer) { item in
                 HStack {
-                    ZStack {
-                        Circle()
-                            .fill(item.tint.opacity(0.18))
-                            .frame(width: 28, height: 28)
-                        Image(systemName: item.symbol)
-                            .font(.caption)
-                            .foregroundStyle(item.tint)
-                    }
+                    PayerAvatar(
+                        member: item.member,
+                        participantProfile: item.participantProfile,
+                        fallbackName: item.name,
+                        fallbackColorHex: item.colorHex,
+                        fallbackPhoto: item.photoData,
+                        size: 28
+                    )
                     Text(item.name)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
@@ -380,10 +595,8 @@ struct StatsView: View {
             Text("カテゴリ別内訳")
                 .font(.headline)
             ForEach(byCategory) { item in
-                HStack {
-                    Image(systemName: item.symbol)
-                        .foregroundStyle(item.tint)
-                        .frame(width: 28)
+                HStack(spacing: 10) {
+                    CategoryIconView(symbol: item.symbol, tint: item.tint, size: 28)
                     Text(item.name)
                     Spacer()
                     Text(CurrencyCatalog.format(item.total, code: primaryCurrencyCode))
