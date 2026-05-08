@@ -155,13 +155,46 @@ final class PurchaseManager: ObservableObject {
         let nowPremium = !ids.intersection(Self.premiumProductIDs).isEmpty
         UserDefaults.standard.set(nowPremium, forKey: Self.isPremiumKey)
 
-        // 期限切れ検知時は通知だけ。auto-revoke / Core Data 書き込みは
-        // CloudKit op (招待中の persistUpdatedShare) と main actor で競合して
-        // 「招待を準備中」が固まる原因になっていたため、Chefie 仕様に揃えて
-        // ここでは触らない方針に戻す。
+        // Premium → 非 Premium に切り替わった時:
+        // 1) AppStore.sync で再確認 (transient 失敗で誤判定しないよう保険)
+        // 2) それでも非 Premium が確定 → revokeAllOwnedShares で全 CKShare の
+        //    参加者を削除 + 公開リンクを無効化
+        // 3) 通知を投げて UI に「Premium が終了しました。共有を解除しました」を出す
+        // 注: 「毎回の refresh で必ず走る」ような Core Data 書き込みは、招待中の
+        //     persistUpdatedShare とぶつかって main actor がデッドロックする
+        //     (= 過去に確認済み) ので、必ず transition (wasPremium && !nowPremium)
+        //     の時だけ走らせる。
         if wasPremium && !nowPremium {
-            NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
+            Task { @MainActor in
+                let confirmedExpired = await Self.confirmExpiry()
+                guard confirmedExpired else { return }
+                await ShareCoordinator.shared.revokeAllOwnedShares()
+                NotificationCenter.default.post(name: .expensoPremiumExpired, object: nil)
+            }
         }
+    }
+
+    /// `AppStore.sync()` で App Store と同期し直してから、もう 1 度
+    /// `Transaction.currentEntitlements` を走査して本当に Premium が無いか確認する。
+    /// transient な StoreKit エラー (= 一時的に entitlement が空) で誤って
+    /// 共有を消さないための二段確認。
+    /// - Returns: 再確認しても非 Premium なら `true` (= 解除して OK)
+    @MainActor
+    private static func confirmExpiry() async -> Bool {
+        try? await AppStore.sync()
+        var ids: Set<String> = []
+        for await result in Transaction.currentEntitlements {
+            if case .verified(let t) = result, t.revocationDate == nil {
+                ids.insert(t.productID)
+            }
+        }
+        let stillNotPremium = ids.intersection(premiumProductIDs).isEmpty
+        if !stillNotPremium {
+            // transient だった → Premium 状態を再確立
+            UserDefaults.standard.set(true, forKey: isPremiumKey)
+            shared.purchasedIDs = ids
+        }
+        return stillNotPremium
     }
 
     private func listenForUpdates() async {
