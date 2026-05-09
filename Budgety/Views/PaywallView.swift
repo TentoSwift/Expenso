@@ -1,0 +1,251 @@
+//
+//  PaywallView.swift
+//  Expenso
+//
+
+import SwiftUI
+import StoreKit
+
+struct PaywallView: View {
+    @StateObject private var pm = PurchaseManager.shared
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    @State private var selectedPlan: PurchaseManager.Plan = .yearly
+    @State private var showRestartAlert: Bool = false
+    @State private var showThanks: Bool = false
+    @State private var showRedeemSheet: Bool = false
+
+    private var isAX: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    hero
+                    if pm.isPremium { activeStatusCard } else {
+                        featuresList
+                        plansSection
+                    }
+                    actions
+                    legalFooter
+                }
+                .padding()
+            }
+            .navigationTitle("Premium")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("閉じる", systemImage: "xmark") { dismiss() }
+                }
+            }
+            .task {
+                if pm.products.isEmpty { await pm.loadProducts() }
+            }
+            .alert("ありがとうございます", isPresented: $showRestartAlert) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("Premium 機能が有効になりました。")
+            }
+            .alert("復元しました", isPresented: $showThanks) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("Premium 機能が復元されました。")
+            }
+        }
+    }
+
+    private var hero: some View {
+        VStack(spacing: 14) {
+            // カテゴリアイコン風: 単色塗りの円 + 白の SF Symbol
+            Image(systemName: "sparkles")
+                .font(.system(size: 44, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 96, height: 96)
+                .background(Circle().fill(Color.yellow.gradient))
+                .shadow(color: .yellow.opacity(0.45), radius: 14, y: 6)
+            Text("Budgety Premium")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+            Text("家族とシートを共有")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var featuresList: some View {
+        VStack(spacing: 10) {
+            featureRow("person.2.fill",
+                       color: Color(red: 0.36, green: 0.55, blue: 0.94),
+                       title: "シートを共有")
+            featureRow("rectangle.stack.fill.badge.plus",
+                       color: Color(red: 0.69, green: 0.32, blue: 0.87),
+                       title: "シートを無制限")
+            featureRow("tag.fill",
+                       color: Color(red: 1.00, green: 0.58, blue: 0.00),
+                       title: "カテゴリ無制限")
+            featureRow("doc.richtext",
+                       color: Color(red: 0.20, green: 0.78, blue: 0.35),
+                       title: "PDF / CSV 出力")
+        }
+    }
+
+    private func featureRow(_ icon: String, color: Color, title: String) -> some View {
+        // カテゴリ風アイコン (色付き円 + 白シンボル)。
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(color.gradient))
+            Text(title)
+                .font(.body.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal)
+    }
+
+    private var activeStatusCard: some View {
+        VStack(spacing: 6) {
+            Label("Premium 解除済み", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundStyle(.green)
+            if let plan = pm.activePlan {
+                Text(plan.label)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .glassEffect(.regular.tint(.green.opacity(0.20)), in: .rect(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private var plansSection: some View {
+        VStack(spacing: 8) {
+            ForEach(PurchaseManager.Plan.allCases) { plan in
+                planCard(plan: plan)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func planCard(plan: PurchaseManager.Plan) -> some View {
+        let product = pm.product(for: plan)
+        let isSelected = selectedPlan == plan
+        Button {
+            selectedPlan = plan
+        } label: {
+            // AX サイズでは横並びだと price が見切れるので縦積み (= AnyLayout で
+            // 通常時 HStack / AX 時 VStack に切替)。
+            let layout = isAX
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 12))
+            layout {
+                HStack(spacing: 12) {
+                    Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                        .foregroundStyle(.white)
+                        .font(.title3)
+                    Text(plan.label)
+                        .font(.body.weight(.semibold))
+                    if !isAX { Spacer() }
+                }
+                if let product {
+                    Text(product.displayPrice)
+                        .font(.body.weight(.semibold).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: isAX ? .infinity : nil, alignment: isAX ? .trailing : .center)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // 全体をヒットテスト対象に (= 余白部分をタップしても選択できる)
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .glassEffect(
+                isSelected
+                    ? .regular.interactive().tint(Color.accentColor)
+                    : .regular.interactive(),
+                in: .rect(cornerRadius: 14)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        VStack(spacing: 10) {
+            if !pm.isPremium {
+                Button {
+                    Task {
+                        guard let product = pm.product(for: selectedPlan) else { return }
+                        if await pm.purchase(product) {
+                            showRestartAlert = true
+                        }
+                    }
+                } label: {
+                    HStack {
+                        if pm.isProcessing { ProgressView() }
+                        Text(pm.isProcessing ? "処理中..." : "購入する")
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(pm.isProcessing || pm.product(for: selectedPlan) == nil)
+            }
+
+            HStack(spacing: 24) {
+                Button("購入を復元") {
+                    Task {
+                        let wasPremium = pm.isPremium
+                        await pm.restore()
+                        if pm.isPremium && !wasPremium {
+                            showThanks = true
+                        }
+                    }
+                }
+                .disabled(pm.isProcessing)
+
+                Button("コードを使用") {
+                    showRedeemSheet = true
+                }
+                .disabled(pm.isProcessing)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .controlSize(.regular)
+            .offerCodeRedemption(isPresented: $showRedeemSheet)
+
+            if let error = pm.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var legalFooter: some View {
+        Text("サブスクは期限 24 時間前までに解約しないと自動更新されます。")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.top, 4)
+    }
+}
+
+#Preview {
+    PaywallView()
+}
