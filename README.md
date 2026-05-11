@@ -54,8 +54,3 @@ CloudKitとの統合（NSPersistentCloudKitContainer）と
 ## 開発状況
 
 ベータ版として動作中。App Store公開に向けて開発を継続しています。
-
-## 開発について
-
-実装には生成AIエージェント（Claude Code）を活用しつつ、
-設計判断・技術選定・UI/UX設計は自分で行いました。
