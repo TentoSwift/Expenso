@@ -50,6 +50,14 @@ struct QuickAddExpenseIntent: AppIntent {
 
         let sheetName = parsed["sheet"] as? String
 
+        // kind: "expense" (既定) または "income"
+        let kind: TransactionKind = {
+            if let s = (parsed["kind"] as? String)?.lowercased() {
+                if s == "income" { return .income }
+            }
+            return .expense
+        }()
+
         // date: ISO8601 文字列 (例: "2026-05-08T15:00:00Z") か秒単位の epoch number
         let date: Date = {
             if let iso = parsed["date"] as? String {
@@ -67,24 +75,31 @@ struct QuickAddExpenseIntent: AppIntent {
         let pc = PersistenceController.shared
         let ctx = pc.container.viewContext
 
-        // シート決定: name 指定 → 一致 / 無ければ一番古いシート
+        // シート決定:
+        //   name 指定 → 同名を createdAt 昇順で取得し、最古を採用
+        //              (同名複数なら collision 件数を warning として返す)
+        //              未ヒットなら最古シートにフォールバック
+        //   name 未指定 → 最古シート
         let sheet: ExpenseSheet
+        var nameCollisionCount: Int = 0
         let sheetReq = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        sheetReq.sortDescriptors = [NSSortDescriptor(keyPath: \ExpenseSheet.createdAt, ascending: true)]
         if let name = sheetName, !name.isEmpty {
             sheetReq.predicate = NSPredicate(format: "name == %@", name)
-            sheetReq.fetchLimit = 1
-            if let found = (try? ctx.fetch(sheetReq))?.first {
-                sheet = found
+            let matches = (try? ctx.fetch(sheetReq)) ?? []
+            if let first = matches.first {
+                sheet = first
+                if matches.count > 1 { nameCollisionCount = matches.count }
             } else {
+                // フォールバック: 最古シート
                 sheetReq.predicate = nil
-                sheetReq.sortDescriptors = [NSSortDescriptor(keyPath: \ExpenseSheet.createdAt, ascending: true)]
+                sheetReq.fetchLimit = 1
                 guard let fallback = (try? ctx.fetch(sheetReq))?.first else {
                     return .result(value: "Error: no sheet found")
                 }
                 sheet = fallback
             }
         } else {
-            sheetReq.sortDescriptors = [NSSortDescriptor(keyPath: \ExpenseSheet.createdAt, ascending: true)]
             sheetReq.fetchLimit = 1
             guard let first = (try? ctx.fetch(sheetReq))?.first else {
                 return .result(value: "Error: no sheet found")
@@ -92,12 +107,23 @@ struct QuickAddExpenseIntent: AppIntent {
             sheet = first
         }
 
-        // カテゴリ決定: シートの最初の支出カテゴリ
-        let categories = (sheet.categories as? Set<ExpenseCategory>) ?? []
-        let firstExpenseCategory = categories
-            .filter { $0.kind == .expense }
+        // カテゴリ決定: kind に応じてシート内カテゴリを絞り、AI 提案 → 失敗時は最初の同 kind カテゴリ
+        let allKindCats = ((sheet.categories as? Set<ExpenseCategory>) ?? [])
+            .filter { $0.kind == kind }
             .sorted { $0.sortOrder < $1.sortOrder }
-            .first
+        var aiSuggested: ExpenseCategory? = nil
+        if CategoryAISuggestor.isAvailable {
+            let names = allKindCats.map { $0.displayName }
+            if !names.isEmpty,
+               let suggestedName = await CategoryAISuggestor.suggest(
+                title: title,
+                kind: kind,
+                categories: names
+               ) {
+                aiSuggested = allKindCats.first(where: { $0.displayName == suggestedName })
+            }
+        }
+        let firstCategory = aiSuggested ?? allKindCats.first
 
         let expense = Expense(context: ctx)
         if let store = sheet.objectID.persistentStore {
@@ -105,13 +131,13 @@ struct QuickAddExpenseIntent: AppIntent {
         }
         expense.amount = NSDecimalNumber(value: amount)
         expense.currencyCode = sheet.resolvedDefaultCurrencyCode
-        expense.kindRaw = TransactionKind.expense.rawValue
+        expense.kindRaw = kind.rawValue
         expense.date = date
         expense.title = title
         expense.note = ""
         expense.createdAt = .now
         expense.sheet = sheet
-        expense.category = firstExpenseCategory
+        expense.category = firstCategory
 
         let profile = UserProfileStore.shared
         if let rn = profile.userRecordName, !rn.isEmpty {
@@ -128,13 +154,17 @@ struct QuickAddExpenseIntent: AppIntent {
             return .result(value: "Error: save failed - \(error.localizedDescription)")
         }
 
-        let summary: [String: Any] = [
+        var summary: [String: Any] = [
             "ok": true,
             "amount": amount,
             "title": title,
             "sheet": sheet.displayName,
-            "category": firstExpenseCategory?.name ?? ""
+            "kind": kind == .income ? "income" : "expense",
+            "category": firstCategory?.name ?? ""
         ]
+        if nameCollisionCount > 1 {
+            summary["warning"] = "name_collision: \(nameCollisionCount) sheets named \"\(sheet.displayName)\". Using oldest by createdAt."
+        }
         let outData = try JSONSerialization.data(
             withJSONObject: summary,
             options: [.sortedKeys]

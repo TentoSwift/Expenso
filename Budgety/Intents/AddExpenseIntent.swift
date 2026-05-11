@@ -54,11 +54,18 @@ struct AddExpenseIntent: AppIntent {
     )
     var dateText: String?
 
+    @Parameter(
+        title: "シート名 (任意)",
+        description: "シート名 (例: 家計簿、仕事) を文字列で指定。設定すると「シート」パラメータより優先されます。MCP / 自動化向け。"
+    )
+    var sheetName: String?
+
     static var parameterSummary: some ParameterSummary {
         Summary("\(\.$sheet) に \(\.$title) (\(\.$amount)) を追加") {
             \.$category
             \.$date
             \.$dateText
+            \.$sheetName
             \.$note
         }
     }
@@ -68,13 +75,36 @@ struct AddExpenseIntent: AppIntent {
         let pc = PersistenceController.shared
         let ctx = pc.container.viewContext
 
-        // sheet 未指定なら一番古いシートをデフォルトとして使う (= MCP / Shortcuts の素朴呼び出し向け)
+        // シート解決順位:
+        //   1) sheetName (文字列) で名前一致 → 見つかればそれ
+        //   2) sheet entity が指定されていればそれ
+        //   3) 一番古いシートをフォールバック (= MCP / Shortcuts の素朴呼び出し向け)
         let coreSheet: ExpenseSheet
-        if let entity = sheet,
-           let url = URL(string: entity.id),
-           let oid = pc.container.persistentStoreCoordinator
-            .managedObjectID(forURIRepresentation: url),
-           let resolved = try? ctx.existingObject(with: oid) as? ExpenseSheet {
+        if let name = sheetName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            // 全シートを取得して name で比較 (predicate より柔軟。
+            // CloudKit / 共有ストア越境や正規化差異にも強い)。
+            let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+            req.returnsObjectsAsFaults = false
+            let all = (try? ctx.fetch(req)) ?? []
+            if let found = all.first(where: { ($0.name ?? "") == name }) {
+                coreSheet = found
+            } else if let found = all.first(where: {
+                ($0.name ?? "").compare(name, options: .caseInsensitive) == .orderedSame
+            }) {
+                coreSheet = found
+            } else {
+                let availableNames = all.compactMap { $0.name }.joined(separator: ", ")
+                throw AppIntentError.sheetNotFoundWithList(
+                    requested: name,
+                    available: availableNames.isEmpty ? "(empty)" : availableNames
+                )
+            }
+        } else if let entity = sheet,
+                  let url = URL(string: entity.id),
+                  let oid = pc.container.persistentStoreCoordinator
+                    .managedObjectID(forURIRepresentation: url),
+                  let resolved = try? ctx.existingObject(with: oid) as? ExpenseSheet {
             coreSheet = resolved
         } else {
             let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
@@ -300,12 +330,18 @@ struct AddExpenseIntent: AppIntent {
 
 enum AppIntentError: Error, CustomLocalizedStringResourceConvertible {
     case sheetNotFound
+    case sheetNotFoundWithList(requested: String, available: String)
+    case debugDump(message: String)
     case emptyTitle
     case invalidAmount
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .sheetNotFound: "シートが見つかりませんでした。"
+        case .sheetNotFoundWithList(let req, let avail):
+            "シート \"\(req)\" が見つかりません。利用可能: \(avail)"
+        case .debugDump(let msg):
+            "DEBUG: \(msg)"
         case .emptyTitle:    "タイトルが空です。"
         case .invalidAmount: "金額は 0 より大きい値を指定してください。"
         }

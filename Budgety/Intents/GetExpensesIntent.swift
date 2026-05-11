@@ -100,6 +100,7 @@ enum PeriodOption: String, AppEnum {
     case lastMonth
     case thisYear
     case last30Days
+    case allTime
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "期間")
     static let caseDisplayRepresentations: [PeriodOption: DisplayRepresentation] = [
@@ -109,7 +110,8 @@ enum PeriodOption: String, AppEnum {
         .thisMonth: "今月",
         .lastMonth: "先月",
         .thisYear: "今年",
-        .last30Days: "直近 30 日"
+        .last30Days: "直近 30 日",
+        .allTime: "全期間"
     ]
 
     var label: String {
@@ -144,6 +146,8 @@ enum PeriodOption: String, AppEnum {
         case .last30Days:
             let s = cal.date(byAdding: .day, value: -30, to: now)!
             return (s, now)
+        case .allTime:
+            return (Date.distantPast, Date.distantFuture)
         }
     }
 }

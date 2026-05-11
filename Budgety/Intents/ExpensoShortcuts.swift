@@ -40,5 +40,23 @@ struct ExpensoShortcuts: AppShortcutsProvider {
             shortTitle: "クイック支出追加",
             systemImageName: "plus.bubble.fill"
         )
+        AppShortcut(
+            intent: QuickGetExpensesIntent(),
+            phrases: [
+                "\(.applicationName) でクイック取得",
+                "Quick get from \(.applicationName)"
+            ],
+            shortTitle: "クイック支出取得",
+            systemImageName: "tray.and.arrow.up.fill"
+        )
+        AppShortcut(
+            intent: QuickBudgetIntent(),
+            phrases: [
+                "\(.applicationName) で家計簿操作",
+                "Run \(.applicationName) command"
+            ],
+            shortTitle: "クイック家計簿",
+            systemImageName: "yensign.circle.fill"
+        )
     }
 }
