@@ -7,17 +7,42 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2D18B4CC2FB31606006F2C29 /* Budgety For watchOS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2D8484602FADB766001AB1B6 /* CustomPicker in Frameworks */ = {isa = PBXBuildFile; productRef = 2D84845F2FADB766001AB1B6 /* CustomPicker */; };
 		A0010000A0010000A0010000 /* MemojiView in Frameworks */ = {isa = PBXBuildFile; productRef = A0030000A0030000A0030000 /* MemojiView */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		2D18B4CA2FB31606006F2C29 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2DDCE1162FA8974700A42F60 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2D18B4C12FB31605006F2C29;
+			remoteInfo = "Budgety For watchOS Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2D18B4D02FB31606006F2C29 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				2D18B4CC2FB31606006F2C29 /* Budgety For watchOS Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		2D8486542FAE4560001AB1B6 /* Budgety Watch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgety Watch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgety For watchOS Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2DDCE11E2FA8974700A42F60 /* Budgety.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Budgety.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		2DD5CEC32FAE509D00013A99 /* Exceptions for "Budgety" folder in "Budgety Watch Watch App" target */ = {
+		2D18B4D92FB31696006F2C29 /* Exceptions for "Budgety" folder in "Budgety For watchOS Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Expenso.xcdatamodeld,
@@ -36,7 +61,7 @@
 				Support/Notifications.swift,
 				UserProfileStore.swift,
 			);
-			target = 2D8486532FAE4560001AB1B6 /* Budgety Watch Watch App */;
+			target = 2D18B4C12FB31605006F2C29 /* Budgety For watchOS Watch App */;
 		};
 		2DDCE1702FA89B5900A42F60 /* Exceptions for "Budgety" folder in "Budgety" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -48,21 +73,16 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		2D8486492FAE455E001AB1B6 /* Budgety Watch */ = {
+		2D18B4C32FB31605006F2C29 /* Budgety For watchOS Watch App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Budgety Watch";
-			sourceTree = "<group>";
-		};
-		2D8486582FAE4560001AB1B6 /* Budgety Watch Watch App */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Budgety Watch Watch App";
+			path = "Budgety For watchOS Watch App";
 			sourceTree = "<group>";
 		};
 		2DDCE1202FA8974700A42F60 /* Budgety */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				2DDCE1702FA89B5900A42F60 /* Exceptions for "Budgety" folder in "Budgety" target */,
-				2DD5CEC32FAE509D00013A99 /* Exceptions for "Budgety" folder in "Budgety Watch Watch App" target */,
+				2D18B4D92FB31696006F2C29 /* Exceptions for "Budgety" folder in "Budgety For watchOS Watch App" target */,
 			);
 			path = Budgety;
 			sourceTree = "<group>";
@@ -70,7 +90,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		2D8486512FAE4560001AB1B6 /* Frameworks */ = {
+		2D18B4BF2FB31605006F2C29 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -93,8 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				2DDCE1202FA8974700A42F60 /* Budgety */,
-				2D8486492FAE455E001AB1B6 /* Budgety Watch */,
-				2D8486582FAE4560001AB1B6 /* Budgety Watch Watch App */,
+				2D18B4C32FB31605006F2C29 /* Budgety For watchOS Watch App */,
 				2DDCE11F2FA8974700A42F60 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -103,7 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				2DDCE11E2FA8974700A42F60 /* Budgety.app */,
-				2D8486542FAE4560001AB1B6 /* Budgety Watch Watch App.app */,
+				2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -111,26 +130,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		2D8486532FAE4560001AB1B6 /* Budgety Watch Watch App */ = {
+		2D18B4C12FB31605006F2C29 /* Budgety For watchOS Watch App */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 2D84865F2FAE4561001AB1B6 /* Build configuration list for PBXNativeTarget "Budgety Watch Watch App" */;
+			buildConfigurationList = 2D18B4CD2FB31606006F2C29 /* Build configuration list for PBXNativeTarget "Budgety For watchOS Watch App" */;
 			buildPhases = (
-				2D8486502FAE4560001AB1B6 /* Sources */,
-				2D8486512FAE4560001AB1B6 /* Frameworks */,
-				2D8486522FAE4560001AB1B6 /* Resources */,
+				2D18B4BE2FB31605006F2C29 /* Sources */,
+				2D18B4BF2FB31605006F2C29 /* Frameworks */,
+				2D18B4C02FB31605006F2C29 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				2D8486582FAE4560001AB1B6 /* Budgety Watch Watch App */,
+				2D18B4C32FB31605006F2C29 /* Budgety For watchOS Watch App */,
 			);
-			name = "Budgety Watch Watch App";
+			name = "Budgety For watchOS Watch App";
 			packageProductDependencies = (
 			);
-			productName = "Budgety Watch Watch App";
-			productReference = 2D8486542FAE4560001AB1B6 /* Budgety Watch Watch App.app */;
+			productName = "Budgety For watchOS Watch App";
+			productReference = 2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */;
 			productType = "com.apple.product-type.application";
 		};
 		2DDCE11D2FA8974700A42F60 /* Budgety */ = {
@@ -140,10 +159,12 @@
 				2DDCE11A2FA8974700A42F60 /* Sources */,
 				2DDCE11B2FA8974700A42F60 /* Frameworks */,
 				2DDCE11C2FA8974700A42F60 /* Resources */,
+				2D18B4D02FB31606006F2C29 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				2D18B4CB2FB31606006F2C29 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2DDCE1202FA8974700A42F60 /* Budgety */,
@@ -164,11 +185,11 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2620;
+				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					2D8486532FAE4560001AB1B6 = {
-						CreatedOnToolsVersion = 26.2;
+					2D18B4C12FB31605006F2C29 = {
+						CreatedOnToolsVersion = 26.3;
 					};
 					2DDCE11D2FA8974700A42F60 = {
 						CreatedOnToolsVersion = 26.2;
@@ -194,13 +215,13 @@
 			projectRoot = "";
 			targets = (
 				2DDCE11D2FA8974700A42F60 /* Budgety */,
-				2D8486532FAE4560001AB1B6 /* Budgety Watch Watch App */,
+				2D18B4C12FB31605006F2C29 /* Budgety For watchOS Watch App */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		2D8486522FAE4560001AB1B6 /* Resources */ = {
+		2D18B4C02FB31605006F2C29 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -217,7 +238,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		2D8486502FAE4560001AB1B6 /* Sources */ = {
+		2D18B4BE2FB31605006F2C29 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -233,19 +254,28 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		2D18B4CB2FB31606006F2C29 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2D18B4C12FB31605006F2C29 /* Budgety For watchOS Watch App */;
+			targetProxy = 2D18B4CA2FB31606006F2C29 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
-		2D8486602FAE4561001AB1B6 /* Debug */ = {
+		2D18B4CE2FB31606006F2C29 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Budgety Watch Watch App/Budgety Watch Watch App.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Budgety For watchOS Watch App/Budgety For watchOS Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 20250512;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Budgety;
+				INFOPLIST_FILE = "Budgety-For-watchOS-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Budgety For watchOS";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.tento.budgety;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -268,18 +298,19 @@
 			};
 			name = Debug;
 		};
-		2D8486612FAE4561001AB1B6 /* Release */ = {
+		2D18B4CF2FB31606006F2C29 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Budgety Watch Watch App/Budgety Watch Watch App.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Budgety For watchOS Watch App/Budgety For watchOS Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 20250512;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Budgety;
+				INFOPLIST_FILE = "Budgety-For-watchOS-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Budgety For watchOS";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.tento.budgety;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -431,7 +462,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Budgety/Expenso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202605125;
+				CURRENT_PROJECT_VERSION = 202605126;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -472,7 +503,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Budgety/Expenso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202605125;
+				CURRENT_PROJECT_VERSION = 202605126;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -508,11 +539,11 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		2D84865F2FAE4561001AB1B6 /* Build configuration list for PBXNativeTarget "Budgety Watch Watch App" */ = {
+		2D18B4CD2FB31606006F2C29 /* Build configuration list for PBXNativeTarget "Budgety For watchOS Watch App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2D8486602FAE4561001AB1B6 /* Debug */,
-				2D8486612FAE4561001AB1B6 /* Release */,
+				2D18B4CE2FB31606006F2C29 /* Debug */,
+				2D18B4CF2FB31606006F2C29 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
