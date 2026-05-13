@@ -182,9 +182,19 @@ struct AddSheetView: View {
     private var sheetIconGrid: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 6)
         let tint = Color(hex: selectedColor) ?? .blue
-        return LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(SheetSymbols.allOptions, id: \.self) { sym in
-                sheetIconButton(sym, tint: tint)
+        return VStack(alignment: .leading, spacing: 16) {
+            ForEach(SheetSymbols.sections) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(section.title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 2)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(section.symbols, id: \.self) { sym in
+                            sheetIconButton(sym, tint: tint)
+                        }
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
