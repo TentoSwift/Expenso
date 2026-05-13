@@ -109,6 +109,39 @@ enum CategoryDefaults {
         "#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#5AC8FA", "#5B8DEF",
         "#5856D6", "#AF52DE", "#FF2D55", "#A2845E", "#8E8E93", "#000000"
     ]
+
+    // MARK: - Symbol Sections (for UI grouping)
+
+    /// セクション単位の SF Symbol カタログ。タイトル + シンボル配列を保持。
+    struct SymbolSection: Identifiable {
+        let id: String
+        let title: String
+        let symbols: [String]
+    }
+
+    /// EditCategoryView 等でセクション見出し付きグリッドを描画するための一覧。
+    static let symbolSections: [SymbolSection] = [
+        SymbolSection(id: "free",                  title: "基本",             symbols: freeSymbols),
+        SymbolSection(id: "foodAndDrink",          title: "食べ物・飲み物",   symbols: SFCatalog.foodAndDrink),
+        SymbolSection(id: "transport",             title: "交通・移動",       symbols: SFCatalog.transport),
+        SymbolSection(id: "homeAndAppliance",      title: "家・家電",         symbols: SFCatalog.homeAndAppliance),
+        SymbolSection(id: "shoppingAndMoney",      title: "買い物・お金",     symbols: SFCatalog.shoppingAndMoney),
+        SymbolSection(id: "entertainmentAndMedia", title: "娯楽・メディア",   symbols: SFCatalog.entertainmentAndMedia),
+        SymbolSection(id: "sportsAndFitness",      title: "スポーツ・運動",   symbols: SFCatalog.sportsAndFitness),
+        SymbolSection(id: "healthAndMedical",      title: "健康・医療",       symbols: SFCatalog.healthAndMedical),
+        SymbolSection(id: "educationAndWork",      title: "教育・仕事",       symbols: SFCatalog.educationAndWork),
+        SymbolSection(id: "devicesAndTech",        title: "デバイス・IT",     symbols: SFCatalog.devicesAndTech),
+        SymbolSection(id: "communication",         title: "通信・連絡",       symbols: SFCatalog.communication),
+        SymbolSection(id: "petsAndNature",         title: "ペット・自然",     symbols: SFCatalog.petsAndNature),
+        SymbolSection(id: "fashionAndBeauty",      title: "ファッション・美容", symbols: SFCatalog.fashionAndBeauty),
+        SymbolSection(id: "toolsAndDIY",           title: "工具・DIY",        symbols: SFCatalog.toolsAndDIY),
+        SymbolSection(id: "travelAndOutdoor",      title: "旅行・アウトドア", symbols: SFCatalog.travelAndOutdoor),
+        SymbolSection(id: "familyAndKids",         title: "家族・子供",       symbols: SFCatalog.familyAndKids),
+        SymbolSection(id: "seasonsAndHolidays",    title: "季節・行事",       symbols: SFCatalog.seasonsAndHolidays),
+        SymbolSection(id: "weatherAndNature",      title: "天気・自然",       symbols: SFCatalog.weatherAndNature),
+        SymbolSection(id: "figures",               title: "人物・アクション", symbols: SFCatalog.figures),
+        SymbolSection(id: "symbolsAndMisc",        title: "シンボル・その他", symbols: SFCatalog.symbolsAndMisc)
+    ]
 }
 
 enum MemberDefaults {
@@ -117,6 +150,7 @@ enum MemberDefaults {
 }
 
 // MARK: - SF Symbol Catalog (Premium)
+
 
 /// カテゴリ別に SF Symbol をキュレーション。CategoryDefaults.premiumSymbols から参照される。
 private enum SFCatalog {

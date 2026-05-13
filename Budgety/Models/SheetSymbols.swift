@@ -81,6 +81,31 @@ enum SheetSymbols {
 
     private static let freeOptionsSet: Set<String> = Set(freeOptions)
 
+
+    // MARK: - Section structure (for UI grouping)
+
+    /// セクション単位の SF Symbol カタログ。タイトル + シンボル配列を保持。
+    struct Section: Identifiable {
+        let id: String
+        let title: String
+        let symbols: [String]
+    }
+
+    /// シンボル選択 UI で section ごとに見出し付きで表示するための一覧。
+    static let sections: [Section] = [
+        Section(id: "free",                  title: "基本",           symbols: freeOptions),
+        Section(id: "lifeAndHome",           title: "家・暮らし",     symbols: lifeAndHome),
+        Section(id: "workAndStudy",          title: "仕事・勉強",     symbols: workAndStudy),
+        Section(id: "travelAndLeisure",      title: "旅行・移動",     symbols: travelAndLeisure),
+        Section(id: "hobbiesAndEntertainment", title: "趣味・娯楽",  symbols: hobbiesAndEntertainment),
+        Section(id: "financeAndShopping",    title: "お金・買い物",   symbols: financeAndShopping),
+        Section(id: "healthAndSports",       title: "健康・スポーツ", symbols: healthAndSports),
+        Section(id: "familyAndPeople",       title: "家族・人",       symbols: familyAndPeople),
+        Section(id: "foodAndDrink",          title: "食べ物・飲み物", symbols: foodAndDrink),
+        Section(id: "seasonalAndEvents",     title: "季節・イベント", symbols: seasonalAndEvents),
+        Section(id: "misc",                  title: "その他",         symbols: misc)
+    ]
+
     // MARK: - Premium catalog (curated for sheets)
 
     private static let lifeAndHome: [String] = [

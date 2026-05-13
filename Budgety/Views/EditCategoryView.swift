@@ -204,9 +204,18 @@ struct EditCategoryView: View {
 
     private var iconCard: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 6)
-        return LazyVGrid(columns: columns, spacing: 14) {
-            ForEach(CategoryDefaults.allSymbols, id: \.self) { sym in
-                iconButton(sym)
+        return VStack(alignment: .leading, spacing: 18) {
+            ForEach(CategoryDefaults.symbolSections) { section in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(section.title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(section.symbols, id: \.self) { sym in
+                            iconButton(sym)
+                        }
+                    }
+                }
             }
         }
         .padding(16)
