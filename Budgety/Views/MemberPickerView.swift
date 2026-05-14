@@ -550,21 +550,19 @@ private struct DebugIDBadge: View {
     }
 
     var body: some View {
-        #if DEBUG
-        HStack(spacing: 6) {
-            if let id = memberID {
-                Text("id:\(id.uuidString.prefix(8))")
+        if BuildInfo.isInternalBuild {
+            HStack(spacing: 6) {
+                if let id = memberID {
+                    Text("id:\(id.uuidString.prefix(8))")
+                }
+                if let rn = recordName, !rn.isEmpty {
+                    Text("rec:\(rn.prefix(10))")
+                }
+                if let extra { Text(extra) }
             }
-            if let rn = recordName, !rn.isEmpty {
-                Text("rec:\(rn.prefix(10))")
-            }
-            if let extra { Text(extra) }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
-        .font(.system(size: 10, design: .monospaced))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        #else
-        EmptyView()
-        #endif
     }
 }
