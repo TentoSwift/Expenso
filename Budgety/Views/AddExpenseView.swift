@@ -1073,9 +1073,9 @@ struct AddExpenseView: View {
                     payerPreview
                 }
             }
-            #if DEBUG
-            payerDebugIDRow
-            #endif
+            if BuildInfo.isInternalBuild {
+                payerDebugIDRow
+            }
         }
     }
 
