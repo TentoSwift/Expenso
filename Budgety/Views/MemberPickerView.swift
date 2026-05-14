@@ -117,39 +117,19 @@ struct MemberPickerView: View {
         }
     }
 
-    /// 自分が選択中かを判定する。
-    /// `selected` が同じ Member objectID か、または「同じ人」(= recordName / userRecordName 一致) なら ✓。
-    /// `selected` が nil の編集モードでは、Expense の保存済み paidBy / payerProfileID から判定する。
+    /// 自分が選択中かを判定する。identity は recordName 一致のみで判断する。
+    /// `selected` の recordName または `fallbackProfileID` が `UserProfileStore.userRecordName`
+    /// と一致するなら ✓。それ以外は ✗ (= 名前一致や UUID 一致は採用しない)。
     private func selfRowIsSelected(_ me: Member) -> Bool {
+        guard let myRN = profile.userRecordName, !myRN.isEmpty else { return false }
         if let s = selected {
-            // 1) objectID 一致 (= 厳密一致)
+            // objectID 一致は厳密一致なので残す
             if s.objectID == me.objectID { return true }
-            // 2) selected.recordName が自分の userRecordName と一致 → 「自分」を示す
-            if let myRN = profile.userRecordName, !myRN.isEmpty,
-               let srn = s.recordName, !srn.isEmpty,
-               srn == myRN {
-                return true
-            }
-            // 3) selected.recordName と me.recordName が一致 (= 同一人物別 Member entity)
-            if let srn = s.recordName, !srn.isEmpty,
-               let mrn = me.recordName, !mrn.isEmpty,
-               srn == mrn {
-                return true
-            }
-            // 4) 名前一致 (旧データ救済)
-            if let sn = s.name, let mn = me.name, !sn.isEmpty, sn == mn {
-                return true
-            }
+            if let srn = s.recordName, !srn.isEmpty, srn == myRN { return true }
             return false
         }
-        // selected が nil でも、編集中の元 paidBy / profileID と一致すれば自分にチェック
-        if let pid = fallbackProfileID, !pid.isEmpty,
-           let rn = profile.userRecordName, !rn.isEmpty, pid == rn {
-            return true
-        }
-        if let name = fallbackPaidBy, !name.isEmpty, name == me.name {
-            return true
-        }
+        // selected == nil (= 編集モードで未読込) の時は Expense.payerProfileID で判定
+        if let pid = fallbackProfileID, !pid.isEmpty, pid == myRN { return true }
         return false
     }
 
@@ -391,14 +371,15 @@ struct MemberPickerView: View {
     }
 
 
+    /// legacy 行が選択中かを判定する。identity は profileID (= recordName) 一致のみで判断する。
+    /// 名前一致や memberID 一致は採用しない。
     private func legacyRowIsSelected(_ info: LegacyPayerInfo) -> Bool {
+        guard let pid = info.profileID, !pid.isEmpty else { return false }
         if let s = selected {
-            if s.name == info.name { return true }
-            if let mid = info.memberID, s.id == mid { return true }
+            if let srn = s.recordName, !srn.isEmpty, srn == pid { return true }
             return false
         }
-        // 編集モードで selected が nil でも、Expense の paidBy と一致するなら ✓
-        if let fp = fallbackPaidBy, fp == info.name { return true }
+        if let fp = fallbackProfileID, !fp.isEmpty, fp == pid { return true }
         return false
     }
 
@@ -454,35 +435,16 @@ struct MemberPickerView: View {
         }
     }
 
+    /// 参加者行が選択中かを判定する。identity は Participant.userRecordID.recordName と
+    /// `selected.recordName` (または `fallbackProfileID`) の一致のみで判断する。
+    /// 名前一致による fallback は採用しない (= 別人の同名衝突を避ける)。
     private func participantRowIsSelected(_ p: CKShare.Participant, info: ParticipantInfo) -> Bool {
-        let participantRN = p.userIdentity.userRecordID?.recordName
-
+        guard let prn = p.userIdentity.userRecordID?.recordName, !prn.isEmpty else { return false }
         if let s = selected {
-            // 1) Member.recordName ↔ Participant.userRecordName で安定 match
-            //    (Member.name が古い場合でも確実に同一人物として認識する)
-            if let memberRN = s.recordName, !memberRN.isEmpty,
-               let prn = participantRN, !prn.isEmpty,
-               memberRN == prn {
-                return true
-            }
-            // 2) info.recordName 経由でも一致を見る (= ParticipantInfo は recordName を保持)
-            if let infoRN = info.recordName, !infoRN.isEmpty,
-               let memberRN = s.recordName, !memberRN.isEmpty,
-               infoRN == memberRN {
-                return true
-            }
-            // 3) フォールバック: 名前一致
-            if s.name == info.name { return true }
+            if let memberRN = s.recordName, !memberRN.isEmpty, memberRN == prn { return true }
             return false
         }
-        // selected が nil でも fallback 情報と一致すればチェック
-        if let pid = fallbackProfileID, !pid.isEmpty,
-           let rn = participantRN, rn == pid {
-            return true
-        }
-        if let name = fallbackPaidBy, !name.isEmpty, name == info.name {
-            return true
-        }
+        if let pid = fallbackProfileID, !pid.isEmpty, pid == prn { return true }
         return false
     }
 

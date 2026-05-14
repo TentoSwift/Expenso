@@ -38,43 +38,24 @@ extension Expense {
     /// (= 自分が払った共有支出や、他端末で作られた支出を編集するときに支払者が解決できるように)。
     @MainActor
     var resolvedPayer: Member? {
+        // 支払者の identity は payerProfileID (= CKContainer.userRecordID.recordName) のみで判定する。
+        // payerMemberID / name は denormalized なキャッシュなので「比較」には使わない。
+        // 自分の Member は selfMemberID で取り、参加者の Member は recordName 一致で取る。
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
-        // 1) payerMemberID (UUID) で直接 fetch (作成時に保存される最も信頼できる識別子)
-        if let mid = payerMemberID {
-            let req = NSFetchRequest<Member>(entityName: "Member")
-            req.predicate = NSPredicate(format: "id == %@", mid as CVarArg)
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first { return m }
-        }
-        // 2) payerProfileID が UUID ならそれで fetch (旧データ救済)
-        if let pid = payerProfileID, !pid.isEmpty,
-           let uuid = UUID(uuidString: pid) {
-            let req = NSFetchRequest<Member>(entityName: "Member")
-            req.predicate = NSPredicate(format: "id == %@", uuid as CVarArg)
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first { return m }
-        }
-        // 3) payerProfileID が CK recordName で、それが自分の userRecordName と一致 → selfMember
-        if let pid = payerProfileID, !pid.isEmpty,
-           let rn = UserProfileStore.shared.userRecordName, rn == pid,
+        guard let pid = payerProfileID, !pid.isEmpty else { return nil }
+
+        // 1) 自分: payerProfileID == userRecordName → selfMember
+        if let rn = UserProfileStore.shared.userRecordName, rn == pid,
            let selfID = UserProfileStore.shared.selfMemberID {
             let req = NSFetchRequest<Member>(entityName: "Member")
             req.predicate = NSPredicate(format: "id == %@", selfID as CVarArg)
             req.fetchLimit = 1
             if let m = (try? ctx.fetch(req))?.first { return m }
         }
-        // 4) payerProfileID が CK recordName と一致する Member.recordName
-        if let pid = payerProfileID, !pid.isEmpty {
-            let req = NSFetchRequest<Member>(entityName: "Member")
-            req.predicate = NSPredicate(format: "recordName == %@", pid)
-            req.fetchLimit = 1
-            if let m = (try? ctx.fetch(req))?.first { return m }
-        }
-        // 5) 名前一致 (旧データ移行用)
-        guard let name = paidBy, !name.isEmpty else { return nil }
+        // 2) 他人: Member.recordName == payerProfileID
         let req = NSFetchRequest<Member>(entityName: "Member")
-        req.predicate = NSPredicate(format: "name == %@", name)
+        req.predicate = NSPredicate(format: "recordName == %@", pid)
         req.fetchLimit = 1
         return (try? ctx.fetch(req))?.first
     }
