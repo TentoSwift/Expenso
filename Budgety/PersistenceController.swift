@@ -210,6 +210,8 @@ final class PersistenceController: ObservableObject {
         cleanupOrphanExpenses()
         // CloudKit 再同期で孤児が降臨することがあるので継続監視
         attachOrphanCleanupObserver()
+        // CKShare の zone 移動で複製されたシートを統合
+        mergeDuplicateSheets()
         // 同じ参加者の Member プロフィール (名前/色/写真) を最新 ParticipantProfile に揃える
         syncMembersFromParticipantProfiles()
 
@@ -221,6 +223,87 @@ final class PersistenceController: ObservableObject {
         mergeDuplicateMembers()
 
         UserDefaults.standard.set(Self.currentMigrationRevision, forKey: Self.migrationRevisionKey)
+    }
+
+    /// CKShare 作成時の zone 移動などで複製されたシートを検出し、
+    /// 子データ (Expense / ExpenseCategory / RecurringRule / ExpenseTemplate /
+    /// ParticipantProfile) を keeper 側へ re-link した上で重複側を削除する。
+    ///
+    /// 判定条件: 同じ `name` + 同じ `createdAt` (秒単位) のシート群を「同一」とみなす。
+    /// keeper の優先順位:
+    ///   1) CKShare が紐付いているシート (= 共有 zone 上のシートを残す)
+    ///   2) それ以外は createdAt 昇順で最古 (= オリジナル想定)
+    private func mergeDuplicateSheets() {
+        let ctx = container.viewContext
+        guard let allSheets = try? ctx.fetch(NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")),
+              allSheets.count > 1 else { return }
+
+        let bucket = Dictionary(grouping: allSheets) { (s: ExpenseSheet) -> String in
+            let name = (s.name ?? "").trimmingCharacters(in: .whitespaces)
+            let ts = s.createdAt.map { Int($0.timeIntervalSince1970) } ?? 0
+            return "\(name)#\(ts)"
+        }
+
+        var didChange = false
+        for (_, sheets) in bucket where sheets.count > 1 {
+            // CKShare が紐付いている方を最優先で keeper にする
+            let withShare: ExpenseSheet? = sheets.first { s in
+                ((try? container.fetchShares(matching: [s.objectID]))?[s.objectID]) != nil
+            }
+            let keeper: ExpenseSheet = withShare ?? sheets
+                .sorted { ($0.createdAt ?? .distantFuture) < ($1.createdAt ?? .distantFuture) }
+                .first!
+            for dup in sheets where dup.objectID != keeper.objectID {
+                relinkChildren(from: dup, to: keeper, ctx: ctx)
+                ctx.delete(dup)
+                didChange = true
+                #if DEBUG
+                print("⚠️ mergeDuplicateSheets: deleted duplicate \(dup.objectID) → keeper \(keeper.objectID) (name=\(keeper.name ?? "?"))")
+                #endif
+            }
+        }
+        if didChange, ctx.hasChanges { try? ctx.save() }
+    }
+
+    /// 重複シート (`dup`) の子データを keeper シートへ移動する。
+    /// 同名の ExpenseCategory や同 recordName の ParticipantProfile が keeper にも
+    /// あれば重複扱いで `dup` 側を削除 (sheet relation だけ書き換える代わりに統合)。
+    private func relinkChildren(from dup: ExpenseSheet, to keeper: ExpenseSheet, ctx: NSManagedObjectContext) {
+        // Expense
+        if let expenses = dup.expenses as? Set<Expense> {
+            for e in expenses { e.sheet = keeper }
+        }
+        // RecurringRule
+        if let rules = dup.recurringRules as? Set<RecurringRule> {
+            for r in rules { r.sheet = keeper }
+        }
+        // ExpenseTemplate
+        if let templates = dup.templates as? Set<ExpenseTemplate> {
+            for t in templates { t.sheet = keeper }
+        }
+        // ExpenseCategory: 同名は keeper の category を優先、重複は削除
+        if let dupCats = dup.categories as? Set<ExpenseCategory> {
+            let keeperCatNames = Set(((keeper.categories as? Set<ExpenseCategory>) ?? []).compactMap { $0.name })
+            for c in dupCats {
+                if let name = c.name, keeperCatNames.contains(name) {
+                    ctx.delete(c)
+                } else {
+                    c.sheet = keeper
+                }
+            }
+        }
+        // ParticipantProfile: 同 recordName は keeper のものを優先、重複は削除
+        if let dupPPs = dup.participantProfiles as? Set<ParticipantProfile> {
+            let keeperRNs = Set(((keeper.participantProfiles as? Set<ParticipantProfile>) ?? [])
+                .compactMap { ($0.recordName ?? "").isEmpty ? nil : $0.recordName })
+            for p in dupPPs {
+                if let rn = p.recordName, !rn.isEmpty, keeperRNs.contains(rn) {
+                    ctx.delete(p)
+                } else {
+                    p.sheet = keeper
+                }
+            }
+        }
     }
 
     /// 既存 Member の denormalized プロフィール (= name / colorHex / photoData) を、
