@@ -119,6 +119,18 @@ struct MemberPickerView: View {
                     } else {
                         Text("selected: (nil)")
                     }
+                    Text("--- candidates ---")
+                    // 自分
+                    Text("  self  \(profile.userRecordName ?? "(empty)")")
+                    // CKShare 参加者
+                    ForEach(otherParticipants, id: \.userIdentity.userRecordID) { p in
+                        let info = participantDisplayInfo(p)
+                        Text("  \(info.name)  \(info.recordName ?? "(empty)")")
+                    }
+                    // legacy
+                    ForEach(legacyPayers) { lp in
+                        Text("  [legacy] \(lp.name)  \(lp.profileID ?? "(empty)")")
+                    }
                 }
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
