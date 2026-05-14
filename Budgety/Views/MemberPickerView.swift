@@ -116,11 +116,32 @@ struct MemberPickerView: View {
         }
     }
 
-    /// 自分が選択中かを Member objectID + fallback 情報の両方で判定する。
+    /// 自分が選択中かを判定する。
+    /// `selected` が同じ Member objectID か、または「同じ人」(= recordName / userRecordName 一致) なら ✓。
+    /// `selected` が nil の編集モードでは、Expense の保存済み paidBy / payerProfileID から判定する。
     private func selfRowIsSelected(_ me: Member) -> Bool {
-        if selected?.objectID == me.objectID { return true }
+        if let s = selected {
+            // 1) objectID 一致 (= 厳密一致)
+            if s.objectID == me.objectID { return true }
+            // 2) selected.recordName が自分の userRecordName と一致 → 「自分」を示す
+            if let myRN = profile.userRecordName, !myRN.isEmpty,
+               let srn = s.recordName, !srn.isEmpty,
+               srn == myRN {
+                return true
+            }
+            // 3) selected.recordName と me.recordName が一致 (= 同一人物別 Member entity)
+            if let srn = s.recordName, !srn.isEmpty,
+               let mrn = me.recordName, !mrn.isEmpty,
+               srn == mrn {
+                return true
+            }
+            // 4) 名前一致 (旧データ救済)
+            if let sn = s.name, let mn = me.name, !sn.isEmpty, sn == mn {
+                return true
+            }
+            return false
+        }
         // selected が nil でも、編集中の元 paidBy / profileID と一致すれば自分にチェック
-        guard selected == nil else { return false }
         if let pid = fallbackProfileID, !pid.isEmpty,
            let rn = profile.userRecordName, !rn.isEmpty, pid == rn {
             return true
@@ -221,7 +242,13 @@ struct MemberPickerView: View {
                memberRN == prn {
                 return true
             }
-            // 2) フォールバック: 名前一致
+            // 2) info.recordName 経由でも一致を見る (= ParticipantInfo は recordName を保持)
+            if let infoRN = info.recordName, !infoRN.isEmpty,
+               let memberRN = s.recordName, !memberRN.isEmpty,
+               infoRN == memberRN {
+                return true
+            }
+            // 3) フォールバック: 名前一致
             if s.name == info.name { return true }
             return false
         }
