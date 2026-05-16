@@ -2,8 +2,10 @@
 //  BudgetyVisionSheetView.swift
 //  Budgety For visionOS
 //
-//  選択中シートのサマリ。Immersive Space の Open/Close ボタンと
-//  カテゴリ別棒グラフ・最近の支出リストを表示する。
+//  iOS 版 SheetDetailView 相当。
+//  - 上部: 今月の合計ヒーロー
+//  - 中央: 日付ごとにグループした支出一覧
+//  - 下部: 追加ボタン
 //
 
 import SwiftUI
@@ -11,192 +13,221 @@ import CoreData
 
 struct BudgetyVisionSheetView: View {
     @ObservedObject var sheet: ExpenseSheet
-    @Binding var immersiveSheetID: NSManagedObjectID?
+    @Environment(\.managedObjectContext) private var viewContext
 
-    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
-    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @State private var showingAdd: Bool = false
+    @State private var editingExpense: Expense?
 
-    @State private var isImmersive: Bool = false
-    @State private var status: String = ""
-
-    private var expenses: [Expense] {
+    private var allExpenses: [Expense] {
         ((sheet.expenses as? Set<Expense>) ?? [])
             .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
     }
 
-    private var monthly: Decimal {
+    private var groupedByDate: [(date: Date, items: [Expense])] {
         let cal = Calendar.current
-        let now = Date()
-        let comps = cal.dateComponents([.year, .month], from: now)
-        return expenses.filter {
-            guard let d = $0.date, $0.kind == .expense else { return false }
-            let c = cal.dateComponents([.year, .month], from: d)
-            return c.year == comps.year && c.month == comps.month
-        }.reduce(Decimal(0)) { $0 + $1.amountDecimal }
+        let dict = Dictionary(grouping: allExpenses) { exp -> Date in
+            cal.startOfDay(for: exp.date ?? .now)
+        }
+        return dict
+            .map { (date: $0.key, items: $0.value) }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var monthlyTotal: Decimal {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: .now)
+        return allExpenses
+            .filter { e in
+                guard let d = e.date, e.kind == .expense else { return false }
+                let c = cal.dateComponents([.year, .month], from: d)
+                return c.year == comps.year && c.month == comps.month
+            }
+            .reduce(Decimal(0)) { $0 + $1.amountDecimal }
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                hero
-                immersiveToggle
-                categoriesSection
-                recentSection
+        ZStack(alignment: .bottom) {
+            ScrollView {
+                VStack(spacing: 24) {
+                    summaryHero
+                    expensesList
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 120)
+                .frame(maxWidth: 880)
+                .frame(maxWidth: .infinity)
             }
-            .padding(32)
-            .frame(maxWidth: 720)
+            addFloatingButton
         }
-        .frame(maxWidth: .infinity)
         .navigationTitle(sheet.displayName)
-    }
-
-    private var hero: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 36, style: .continuous)
-                    .fill(sheet.tint.gradient)
-                    .frame(width: 120, height: 120)
-                    .shadow(color: sheet.tint.opacity(0.4), radius: 20, y: 10)
-                Image(systemName: sheet.symbol ?? "person.2.fill")
-                    .font(.system(size: 56, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            Text("今月の支出")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Text(CurrencyCatalog.format(monthly, code: sheet.resolvedDefaultCurrencyCode))
-                .font(.system(size: 56, weight: .bold, design: .rounded))
-                .monospacedDigit()
+        .sheet(isPresented: $showingAdd) {
+            VisionAddExpenseView(sheet: sheet, expense: nil)
+        }
+        .sheet(item: $editingExpense) { e in
+            VisionAddExpenseView(sheet: sheet, expense: e)
         }
     }
 
-    private var immersiveToggle: some View {
-        Button {
-            Task { await toggleImmersive() }
-        } label: {
+    // MARK: - Sections
+
+    private var summaryHero: some View {
+        VStack(spacing: 6) {
             HStack {
-                Image(systemName: isImmersive ? "xmark.circle.fill" : "sparkles")
-                Text(isImmersive ? "没入モードを閉じる" : "没入モードで可視化")
-                    .fontWeight(.semibold)
+                Image(systemName: sheet.symbol ?? "person.2.fill")
+                    .foregroundStyle(.white)
+                    .padding(10)
+                    .background(Circle().fill(sheet.tint.gradient))
+                Text(sheet.displayName).font(.title3.weight(.semibold))
+                Spacer()
+                if sheet.isOwnedByCurrentUser == false {
+                    Label("受信中", systemImage: "tray.and.arrow.down")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(.blue.opacity(0.15)))
+                        .foregroundStyle(.blue)
+                } else if hasParticipants {
+                    Label("共有中", systemImage: "person.2.fill")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(.green.opacity(0.15)))
+                        .foregroundStyle(.green)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .padding(.horizontal, 24)
+            HStack {
+                Text("今月")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(sheet.tint.opacity(0.2)))
+                Spacer()
+            }
+            HStack {
+                Text(CurrencyCatalog.format(monthlyTotal, code: sheet.resolvedDefaultCurrencyCode))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Spacer()
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(sheet.tint.opacity(0.12))
+        )
+    }
+
+    private var hasParticipants: Bool {
+        guard let pps = sheet.participantProfiles as? Set<ParticipantProfile> else { return false }
+        return pps.count >= 2  // 自分 + 他 1 人以上
+    }
+
+    private var expensesList: some View {
+        VStack(spacing: 16) {
+            if groupedByDate.isEmpty {
+                ContentUnavailableView {
+                    Label("支出がありません", systemImage: "list.bullet")
+                } description: {
+                    Text("右下の + ボタンから最初の支出を追加してください。")
+                }
+                .padding(.vertical, 40)
+            }
+            ForEach(groupedByDate, id: \.date) { group in
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(dayHeader(group.date))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(daySigned(group.items, code: sheet.resolvedDefaultCurrencyCode))
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    VStack(spacing: 0) {
+                        ForEach(group.items, id: \.objectID) { e in
+                            Button {
+                                editingExpense = e
+                            } label: {
+                                expenseRow(e)
+                            }
+                            .buttonStyle(.plain)
+                            if e.objectID != group.items.last?.objectID {
+                                Divider().padding(.leading, 60)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(.regularMaterial)
+                    )
+                }
+            }
+        }
+    }
+
+    private func expenseRow(_ e: Expense) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(e.categoryTint.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                Image(systemName: e.categorySymbol)
+                    .foregroundStyle(e.categoryTint)
+                    .font(.callout)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.displayTitle)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                let payer = e.displayPaidBy
+                if !payer.isEmpty {
+                    Text(payer)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Text(e.formattedSignedAmount)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(e.kind == .income ? .green : .primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    private var addFloatingButton: some View {
+        Button {
+            showingAdd = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.title2.weight(.semibold))
+                .frame(width: 56, height: 56)
         }
         .buttonStyle(.borderedProminent)
+        .clipShape(Circle())
         .controlSize(.extraLarge)
-        .tint(isImmersive ? .red : .accentColor)
-    }
-
-    private var categoriesSection: some View {
-        let cats = categoryTotals()
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("カテゴリ別 (今月)")
-                .font(.title3.weight(.semibold))
-            if cats.isEmpty {
-                Text("今月の支出はまだありません。")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(cats, id: \.name) { c in
-                    HStack(spacing: 12) {
-                        Circle().fill(c.color).frame(width: 14, height: 14)
-                        Text(c.name).frame(width: 140, alignment: .leading)
-                        GeometryReader { geo in
-                            let ratio = NSDecimalNumber(decimal: c.total / max(c.maxTotal, Decimal(1))).doubleValue
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(c.color.gradient)
-                                .frame(width: CGFloat(ratio) * geo.size.width, height: 12)
-                        }
-                        .frame(height: 12)
-                        Text(CurrencyCatalog.format(c.total, code: sheet.resolvedDefaultCurrencyCode))
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 120, alignment: .trailing)
-                    }
-                }
-            }
-        }
-        .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-    }
-
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("最近の支出")
-                .font(.title3.weight(.semibold))
-            ForEach(expenses.prefix(8), id: \.objectID) { e in
-                HStack {
-                    Image(systemName: e.categorySymbol)
-                        .foregroundStyle(e.categoryTint)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(e.displayTitle).font(.body)
-                        Text(formatDate(e.date ?? .now))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(e.formattedSignedAmount)
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(e.kind == .income ? .green : .primary)
-                }
-                .padding(.vertical, 4)
-                Divider()
-            }
-        }
-        .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .padding(.bottom, 28)
     }
 
     // MARK: - Helpers
 
-    private struct CategoryTotal {
-        let name: String
-        let total: Decimal
-        let color: Color
-        let maxTotal: Decimal
-    }
-
-    private func categoryTotals() -> [CategoryTotal] {
-        let cal = Calendar.current
-        let now = Date()
-        let comps = cal.dateComponents([.year, .month], from: now)
-        let monthExp = expenses.filter {
-            guard let d = $0.date, $0.kind == .expense else { return false }
-            let c = cal.dateComponents([.year, .month], from: d)
-            return c.year == comps.year && c.month == comps.month
-        }
-        let grouped = Dictionary(grouping: monthExp) { $0.categoryDisplayName }
-        let totals = grouped.map { (name, items) -> (String, Decimal, Color) in
-            let sum = items.reduce(Decimal(0)) { $0 + $1.amountDecimal }
-            let color = items.first?.categoryTint ?? .gray
-            return (name, sum, color)
-        }
-        let maxV = totals.map(\.1).max() ?? Decimal(1)
-        return totals
-            .map { CategoryTotal(name: $0.0, total: $0.1, color: $0.2, maxTotal: maxV) }
-            .sorted { $0.total > $1.total }
-    }
-
-    private func formatDate(_ d: Date) -> String {
+    private func dayHeader(_ d: Date) -> String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "ja_JP")
-        df.dateFormat = "M/d (E)"
+        df.dateFormat = "yyyy年M月d日 (E)"
         return df.string(from: d)
     }
 
-    @MainActor
-    private func toggleImmersive() async {
-        if isImmersive {
-            await dismissImmersiveSpace()
-            isImmersive = false
-            immersiveSheetID = nil
-        } else {
-            immersiveSheetID = sheet.objectID
-            let result = await openImmersiveSpace(id: "budgety-immersive")
-            if case .opened = result {
-                isImmersive = true
-            }
+    private func daySigned(_ items: [Expense], code: String) -> String {
+        let total = items.reduce(Decimal(0)) { acc, e in
+            acc + (e.kind == .income ? e.amountDecimal : -e.amountDecimal)
         }
+        let sign = total >= 0 ? "+" : ""
+        return sign + CurrencyCatalog.format(total, code: code)
     }
 }
