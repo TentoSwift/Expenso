@@ -6,17 +6,23 @@
 import Foundation
 import CoreData
 import SwiftUI
+import CloudKit
 
 extension Expense {
     var displayTitle: String { title ?? "" }
 
-    /// 表示名 / 色 / 写真: ParticipantProfile を優先する。
-    /// ParticipantProfile はシートに紐付き CloudKit Sharing で常に最新が同期されるため、
-    /// ローカル Member の denormalized キャッシュ (古い写真や旧名) より信頼できる。
-    /// ParticipantProfile が無い場合だけ Member → 保存時の paidBy にフォールバックする。
+    /// 支払者の表示名。`payerProfileID` (canonical) から動的に解決する。
+    /// 解決順:
+    /// 1. ParticipantProfile.displayName (= 共有相手が設定した表示名、最優先)
+    /// 2. 自分 → UserProfileStore.resolvedDisplayName (= "自分" or 設定名)
+    /// 3. CKShare 参加者 → iCloud nameComponents (or email fallback)
+    /// 4. ローカル Member.displayName (= 過去に picker で選んだキャッシュ)
+    /// 5. 保存時の `paidBy` 文字列 (= 旧データ用 fallback)
     @MainActor
     var displayPaidBy: String {
         if let n = resolvedParticipantProfile?.displayName, !n.isEmpty { return n }
+        if let n = resolvedSelfDisplayName(), !n.isEmpty { return n }
+        if let n = resolvedSharedParticipantName(), !n.isEmpty { return n }
         if let n = resolvedPayer?.displayName, !n.isEmpty { return n }
         return paidBy ?? ""
     }
@@ -26,27 +32,95 @@ extension Expense {
            let c = Color(hex: hex) {
             return c
         }
+        if isPayerSelf {
+            return UserProfileStore.shared.bgColor
+        }
         return resolvedPayer?.tint ?? .secondary
     }
     @MainActor
     var payerPhotoData: Data? {
-        resolvedParticipantProfile?.photoData ?? resolvedPayer?.photoData
+        if let pp = resolvedParticipantProfile?.photoData { return pp }
+        if isPayerSelf { return UserProfileStore.shared.photoData }
+        return resolvedPayer?.photoData
     }
+
+    /// `payerProfileID` が「自分」を指しているか。
+    @MainActor
+    var isPayerSelf: Bool {
+        guard let pid = payerProfileID, !pid.isEmpty else { return false }
+        #if !os(watchOS)
+        let share: CKShare? = sheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+        #else
+        let share: CKShare? = nil
+        #endif
+        return UserProfileStore.shared.canonicalSelfIDs(forShare: share).contains(pid)
+    }
+
+    /// payerProfileID が自分なら UserProfileStore の displayName を返す。
+    @MainActor
+    private func resolvedSelfDisplayName() -> String? {
+        guard isPayerSelf else { return nil }
+        return UserProfileStore.shared.resolvedDisplayName
+    }
+
+    /// payerProfileID が CKShare の参加者 (オーナー含む) なら iCloud nameComponents を返す。
+    @MainActor
+    private func resolvedSharedParticipantName() -> String? {
+        #if !os(watchOS)
+        guard let pid = payerProfileID, !pid.isEmpty,
+              let sheet = sheet,
+              let share = ShareCoordinator.shared.existingShare(for: sheet) else { return nil }
+        // オーナー (= 参加者から見たら share.owner)
+        if let ownerRN = share.owner.userIdentity.userRecordID?.recordName,
+           pid == ownerRN {
+            return nameFromIdentity(share.owner.userIdentity)
+        }
+        // 参加者: canonical ID 一致を探す
+        for p in share.participants {
+            if let cid = p.budgetyCanonicalID, cid == pid {
+                return nameFromIdentity(p.userIdentity)
+            }
+        }
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
+    #if !os(watchOS)
+    @MainActor
+    private func nameFromIdentity(_ identity: CKUserIdentity) -> String? {
+        if let nc = identity.nameComponents {
+            let formatted = PersonNameComponentsFormatter().string(from: nc)
+            if !formatted.isEmpty { return formatted }
+        }
+        if let email = identity.lookupInfo?.emailAddress, !email.isEmpty {
+            return email
+        }
+        return nil
+    }
+    #endif
 
     /// 支払者の Member を引く。Member は Private ストアにしか存在しないが、
     /// id / recordName / 名前のいずれかで見つかれば Shared ストアの Expense でも返す
     /// (= 自分が払った共有支出や、他端末で作られた支出を編集するときに支払者が解決できるように)。
     @MainActor
     var resolvedPayer: Member? {
-        // 支払者の identity は payerProfileID (= CKContainer.userRecordID.recordName) のみで判定する。
-        // payerMemberID / name は denormalized なキャッシュなので「比較」には使わない。
-        // 自分の Member は selfMemberID で取り、参加者の Member は recordName 一致で取る。
+        // 支払者の identity は payerProfileID で判定する。共有シートの場合は
+        // canonicalSelfIDs (シート用 canonical + 旧 userRecordName) と照合し、
+        // 旧 ID が残っていても「自分」として解決できるようにする。
         let pc = PersistenceController.shared
         let ctx = managedObjectContext ?? pc.container.viewContext
         guard let pid = payerProfileID, !pid.isEmpty else { return nil }
 
-        // 1) 自分: payerProfileID == userRecordName → selfMember
-        if let rn = UserProfileStore.shared.userRecordName, rn == pid,
+        // 1) 自分: payerProfileID が canonical self ID 群のいずれかと一致 → selfMember
+        #if !os(watchOS)
+        let share: CKShare? = sheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+        #else
+        let share: CKShare? = nil
+        #endif
+        let selfIDs = UserProfileStore.shared.canonicalSelfIDs(forShare: share)
+        if selfIDs.contains(pid),
            let selfID = UserProfileStore.shared.selfMemberID {
             let req = NSFetchRequest<Member>(entityName: "Member")
             req.predicate = NSPredicate(format: "id == %@", selfID as CVarArg)

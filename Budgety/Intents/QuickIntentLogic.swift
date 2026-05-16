@@ -175,9 +175,9 @@ enum QuickIntentLogic {
         expense.category = firstCategory
 
         let profile = UserProfileStore.shared
-        if let rn = profile.userRecordName, !rn.isEmpty {
-            expense.payerProfileID = rn
-            expense.paidBy = profile.resolvedDisplayName
+        let share = ShareCoordinator.shared.existingShare(for: sheet)
+        if let pid = profile.canonicalSelfID(forShare: share), !pid.isEmpty {
+            expense.payerProfileID = pid
         }
         if let memberID = profile.selfMemberID {
             expense.payerMemberID = memberID

@@ -57,7 +57,8 @@ enum RecurringExpenseGenerator {
             expense.kindRaw = rule.kindRaw
             expense.currencyCode = rule.currencyCode
             expense.categoryRaw = rule.categoryRaw
-            expense.paidBy = rule.paidBy
+            // paidBy は denormalized キャッシュなので継承しない。表示は payerProfileID から動的解決される。
+            expense.paidBy = nil
             expense.payerProfileID = rule.payerProfileID
             expense.note = rule.note
             expense.date = date

@@ -163,9 +163,9 @@ extension QuickIntentLogic {
         }
 
         let profile = UserProfileStore.shared
-        if let rn = profile.userRecordName, !rn.isEmpty {
-            rule.payerProfileID = rn
-            rule.paidBy = profile.resolvedDisplayName
+        let share = ShareCoordinator.shared.existingShare(for: sheet)
+        if let pid = profile.canonicalSelfID(forShare: share), !pid.isEmpty {
+            rule.payerProfileID = pid
         }
 
         do {

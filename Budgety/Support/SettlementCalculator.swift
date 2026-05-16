@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import CloudKit
 
 /// 1 メンバーの net 残高 (= 立て替えた金額 - 自分の負担)。
 /// `> 0` なら受け取り、`< 0` なら支払いが必要。
@@ -57,16 +58,40 @@ enum SettlementCalculator {
             return true
         }
 
+        // 「自分」の複数 ID (旧 userRecordName / canonical / cross-device で書かれた別 ID)
+        // を一つの canonical に畳む。これで履歴的に複数 ID で記録された自分の expense が
+        // 一人として正しく集計される。
+        let share: CKShare? = {
+            #if !os(watchOS)
+            return ShareCoordinator.shared.existingShare(for: sheet)
+            #else
+            return nil
+            #endif
+        }()
+        let selfIDs = UserProfileStore.shared.canonicalSelfIDs(forShare: share)
+        let selfCanonical = UserProfileStore.shared.canonicalSelfID(forShare: share)
+            ?? UserProfileStore.shared.userRecordName
+            ?? ""
+        let normalize: (String) -> String = { pid in
+            (!selfCanonical.isEmpty && selfIDs.contains(pid)) ? selfCanonical : pid
+        }
+
         // メンバー集合を確定。Expense に出てくる payer/beneficiary もここに含めることで、
         // 既にシートを退出した参加者の残高もきちんと反映される。
-        var memberOrder: [String] = sheet.allMemberProfileIDs()
-        var memberSet = Set(memberOrder)
+        var memberOrder: [String] = []
+        var memberSet = Set<String>()
+        for raw in sheet.allMemberProfileIDs() {
+            let nid = normalize(raw)
+            if memberSet.insert(nid).inserted { memberOrder.append(nid) }
+        }
         for e in expenses {
-            if let p = e.payerProfileID, !p.isEmpty, memberSet.insert(p).inserted {
-                memberOrder.append(p)
+            if let p = e.payerProfileID, !p.isEmpty {
+                let nid = normalize(p)
+                if memberSet.insert(nid).inserted { memberOrder.append(nid) }
             }
-            for b in e.beneficiaryIDList where memberSet.insert(b).inserted {
-                memberOrder.append(b)
+            for b in e.beneficiaryIDList {
+                let nid = normalize(b)
+                if memberSet.insert(nid).inserted { memberOrder.append(nid) }
             }
         }
 
@@ -82,10 +107,11 @@ enum SettlementCalculator {
                 missing.insert(from)
                 continue
             }
-            let beneficiaries = e.resolvedBeneficiaryIDs()
+            let beneficiaries = e.resolvedBeneficiaryIDs().map(normalize)
             guard !beneficiaries.isEmpty else { continue }
             // payer 不明 (legacy / インポート) の支出はスキップ
-            guard let payer = e.payerProfileID, !payer.isEmpty else { continue }
+            guard let rawPayer = e.payerProfileID, !rawPayer.isEmpty else { continue }
+            let payer = normalize(rawPayer)
 
             let count = Decimal(beneficiaries.count)
             let perShare = roundToCurrency(converted / count, code: target)

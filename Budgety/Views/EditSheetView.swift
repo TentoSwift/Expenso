@@ -52,8 +52,6 @@ struct EditSheetView: View {
     var body: some View {
         NavigationStack {
             Form {
-                profileSection
-
                 Section {
                     HStack {
                         Spacer()
@@ -168,9 +166,6 @@ struct EditSheetView: View {
             }
         }
     }
-
-    @ViewBuilder
-    private var profileSection: some View { EmptyView() }
 
     private var sheetIconGrid: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 6)

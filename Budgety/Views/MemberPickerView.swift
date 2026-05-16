@@ -54,20 +54,29 @@ struct MemberPickerView: View {
 
     /// 自分の per-sheet ParticipantProfile (= シート単位の override 含む)。
     /// row のアバター/名前を Member ではなく PP 由来で出すための参照。
+    /// canonical (このシート用) と旧 userRecordName の両方にマッチさせる。
     private var selfPerSheetProfile: ParticipantProfile? {
         guard BuildInfo.profileFeatureEnabled else { return nil }
         guard let record,
-              let rn = profile.userRecordName, !rn.isEmpty,
               let profiles = record.participantProfiles as? Set<ParticipantProfile> else { return nil }
-        return profiles.first(where: { $0.recordName == rn })
+        var candidates: Set<String> = []
+        if let urn = profile.userRecordName, !urn.isEmpty { candidates.insert(urn) }
+        if let cid = profile.canonicalSelfID(forShare: share), !cid.isEmpty { candidates.insert(cid) }
+        return profiles.first(where: {
+            guard let rn = $0.recordName, !rn.isEmpty else { return false }
+            return candidates.contains(rn)
+        })
     }
 
-    /// CKShare に居る、自分以外の参加者 (オーナー含む)
+    /// CKShare に居る、自分以外の参加者 (オーナー含む)。
+    /// CKShare では「見ている本人」のエントリは userRecordID.recordName が
+    /// `__defaultOwner__` placeholder に匿名化される。これをそのまま `!=` 比較すると
+    /// 別人どうし両方が placeholder の場合誤マッチするので、placeholder 判定で除外する。
     private var otherParticipants: [CKShare.Participant] {
         guard let share = share else { return [] }
-        let myUserID = share.currentUserParticipant?.userIdentity.userRecordID
         return share.participants.filter { p in
-            p.userIdentity.userRecordID != myUserID
+            let rn = p.userIdentity.userRecordID?.recordName ?? ""
+            return !UserProfileStore.isSelfPlaceholderRecordName(rn)
         }
     }
 
@@ -134,6 +143,36 @@ struct MemberPickerView: View {
                     } else {
                         Text("self userRecordName: (empty)")
                     }
+                    // CKShare 経由で見た「自分」の userRecordID。
+                    if let share = share {
+                        if let rn = share.currentUserParticipant?.userIdentity.userRecordID?.recordName, !rn.isEmpty {
+                            Text("self via CKShare: \(rn)")
+                        } else {
+                            Text("self via CKShare: (no currentUserParticipant)")
+                        }
+                        if let oRN = share.owner.userIdentity.userRecordID?.recordName, !oRN.isEmpty {
+                            Text("share.owner: \(oRN)")
+                        } else {
+                            Text("share.owner: (no recordID)")
+                        }
+                        Text("--- share.participants (\(share.participants.count)) ---")
+                        ForEach(Array(share.participants.enumerated()), id: \.offset) { _, p in
+                            let rn = p.userIdentity.userRecordID?.recordName ?? "(nil)"
+                            let role: String = {
+                                switch p.role {
+                                case .owner: return "owner"
+                                case .privateUser: return "private"
+                                case .publicUser: return "public"
+                                case .unknown: return "unknown"
+                                @unknown default: return "?"
+                                }
+                            }()
+                            let email = p.userIdentity.lookupInfo?.emailAddress ?? "-"
+                            Text("  rn:\(rn)  role:\(role)  email:\(email)")
+                        }
+                    } else {
+                        Text("self via CKShare: (no share loaded)")
+                    }
                     // 自分の photoData がローカルにあるか確認 (= UserProfileStore.photoData)
                     if let bytes = profile.photoData?.count, bytes > 0 {
                         Text("self photoData: ✓ \(bytes) bytes")
@@ -189,7 +228,10 @@ struct MemberPickerView: View {
                     Text("未選択")
                         .foregroundStyle(.primary)
                     Spacer()
-                    if selected == nil {
+                    // 真に未選択 = selected が nil AND 編集対象 Expense の payerProfileID も空。
+                    // Member の解決に失敗しただけで fallbackProfileID が入っている場合は
+                    // 他の行 (オーナー / 参加者 / legacy) で ✓ が付くため、ここには付けない。
+                    if selected == nil && (fallbackProfileID ?? "").isEmpty {
                         Image(systemName: "checkmark").foregroundStyle(.tint)
                     }
                 }
@@ -198,19 +240,21 @@ struct MemberPickerView: View {
         }
     }
 
-    /// 自分が選択中かを判定する。identity は recordName 一致のみで判断する。
-    /// `selected` の recordName または `fallbackProfileID` が `UserProfileStore.userRecordName`
-    /// と一致するなら ✓。それ以外は ✗ (= 名前一致や UUID 一致は採用しない)。
+    /// 自分が選択中かを判定する。canonical self ID (このシート用) と、
+    /// backward compat のための旧 `userRecordName` の両方にマッチさせる。
+    /// 後者は MacB のように CKContainer.userRecordID() がオーナー側 CKShare の
+    /// participant.userIdentity.userRecordID と一致しないケースで残された旧 Expense を
+    /// 「自分」として認識できるようにするため。
     private func selfRowIsSelected(_ me: Member) -> Bool {
-        guard let myRN = profile.userRecordName, !myRN.isEmpty else { return false }
+        let selfIDs = profile.canonicalSelfIDs(forShare: share)
         if let s = selected {
             // objectID 一致は厳密一致なので残す
             if s.objectID == me.objectID { return true }
-            if let srn = s.recordName, !srn.isEmpty, srn == myRN { return true }
+            if let srn = s.recordName, !srn.isEmpty, selfIDs.contains(srn) { return true }
             return false
         }
         // selected == nil (= 編集モードで未読込) の時は Expense.payerProfileID で判定
-        if let pid = fallbackProfileID, !pid.isEmpty, pid == myRN { return true }
+        if let pid = fallbackProfileID, !pid.isEmpty, selfIDs.contains(pid) { return true }
         return false
     }
 
@@ -266,7 +310,11 @@ struct MemberPickerView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if let rn = (selfMember?.recordName ?? profile.userRecordName), !rn.isEmpty {
+                // このシート用の canonical self ID を優先表示する (Member.recordName は
+                // 旧 userRecordName が残っていることがあるため)。
+                if let rn = (profile.canonicalSelfID(forShare: share)
+                                ?? selfMember?.recordName
+                                ?? profile.userRecordName), !rn.isEmpty {
                     Text("ID: \(rn)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
@@ -287,6 +335,15 @@ struct MemberPickerView: View {
         profile.ensureSelfMemberExists(in: viewContext)
         if let id = profile.selfMemberID,
            let me = allMembers.first(where: { $0.id == id }) {
+            // このシート用の canonical self ID を Member.recordName に書き込んでおく。
+            // 呼び出し側 (AddExpenseView 等) は `selected.recordName` を
+            // expense.payerProfileID に転写するので、ここで canonical を入れておくと
+            // 共有先からも自分として正しく解決される。
+            if let cid = profile.canonicalSelfID(forShare: share), me.recordName != cid {
+                me.recordName = cid
+                me.updatedAt = .now
+                try? viewContext.save()
+            }
             selected = me
         }
         dismiss()
@@ -298,10 +355,8 @@ struct MemberPickerView: View {
     /// 値は表示名のソート済み配列。重複は名前単位で除外。
     private var legacyPayers: [LegacyPayerInfo] {
         guard let record else { return [] }
-        let myRN = profile.userRecordName ?? ""
-        let participantRNs = Set(
-            otherParticipants.compactMap { $0.userIdentity.userRecordID?.recordName }
-        )
+        let selfIDs = profile.canonicalSelfIDs(forShare: share)
+        let participantIDs = Set(otherParticipants.compactMap { $0.budgetyCanonicalID })
         let participantNames = Set(otherParticipants.map { participantDisplayInfo($0).name })
         let selfNames = Set([profile.resolvedDisplayName, "自分"])
         let memberRecordNames = Set(allMembers.compactMap { $0.recordName }.filter { !$0.isEmpty })
@@ -316,8 +371,8 @@ struct MemberPickerView: View {
             guard !name.isEmpty else { continue }
             let pid = e.payerProfileID ?? ""
             // 自分 / 既知参加者 / 既知 Member.recordName と被るものはスキップ
-            if !pid.isEmpty, pid == myRN { continue }
-            if !pid.isEmpty, participantRNs.contains(pid) { continue }
+            if !pid.isEmpty, selfIDs.contains(pid) { continue }
+            if !pid.isEmpty, participantIDs.contains(pid) { continue }
             if !pid.isEmpty, memberRecordNames.contains(pid) { continue }
             if selfNames.contains(name) { continue }
             if participantNames.contains(name) { continue }
@@ -379,10 +434,10 @@ struct MemberPickerView: View {
     /// 「過去の支払者」行の context menu。シート参加者と自分を統合先候補として並べる。
     @ViewBuilder
     private func mergeMenuItems(for info: LegacyPayerInfo) -> some View {
-        // 「自分に統合」
-        if let myRN = profile.userRecordName, !myRN.isEmpty {
+        // 「自分に統合」: このシート向けの canonical self ID を使う
+        if let myCID = profile.canonicalSelfID(forShare: share), !myCID.isEmpty {
             Button {
-                mergeLegacyPayer(info, toRecordName: myRN, toName: profile.resolvedDisplayName, toMemberID: profile.selfMemberID)
+                mergeLegacyPayer(info, toRecordName: myCID, toName: profile.resolvedDisplayName, toMemberID: profile.selfMemberID)
             } label: {
                 Label("\(profile.resolvedDisplayName) (自分) に統合", systemImage: "arrow.merge")
             }
@@ -522,16 +577,16 @@ struct MemberPickerView: View {
         }
     }
 
-    /// 参加者行が選択中かを判定する。identity は Participant.userRecordID.recordName と
+    /// 参加者行が選択中かを判定する。identity は participant の canonical ID と
     /// `selected.recordName` (または `fallbackProfileID`) の一致のみで判断する。
     /// 名前一致による fallback は採用しない (= 別人の同名衝突を避ける)。
     private func participantRowIsSelected(_ p: CKShare.Participant, info: ParticipantInfo) -> Bool {
-        guard let prn = p.userIdentity.userRecordID?.recordName, !prn.isEmpty else { return false }
+        guard let cid = p.budgetyCanonicalID, !cid.isEmpty else { return false }
         if let s = selected {
-            if let memberRN = s.recordName, !memberRN.isEmpty, memberRN == prn { return true }
+            if let memberRN = s.recordName, !memberRN.isEmpty, memberRN == cid { return true }
             return false
         }
-        if let pid = fallbackProfileID, !pid.isEmpty, pid == prn { return true }
+        if let pid = fallbackProfileID, !pid.isEmpty, pid == cid { return true }
         return false
     }
 
@@ -581,14 +636,15 @@ struct MemberPickerView: View {
         let recordName: String?
     }
 
-    /// 同シート配下の ParticipantProfile を recordName 一致で引く
+    /// 同シート配下の ParticipantProfile を canonical ID 一致で引く。
+    /// PP.recordName は canonical (オーナーなら userRecordName、参加者なら "email:...")
+    /// で書かれているため、raw userRecordID では一致しないことに注意。
     private func participantProfile(for p: CKShare.Participant) -> ParticipantProfile? {
         guard BuildInfo.profileFeatureEnabled else { return nil }
         guard let record = record,
-              let rn = p.userIdentity.userRecordID?.recordName,
-              !rn.isEmpty, rn != "_defaultOwner_", rn != "__defaultOwner__",
+              let cid = p.budgetyCanonicalID, !cid.isEmpty,
               let profiles = record.participantProfiles as? Set<ParticipantProfile> else { return nil }
-        return profiles.first(where: { $0.recordName == rn })
+        return profiles.first(where: { $0.recordName == cid })
     }
 
     private func participantDisplayInfo(_ p: CKShare.Participant) -> ParticipantInfo {
@@ -603,13 +659,7 @@ struct MemberPickerView: View {
             return p.role == .owner ? "オーナー" : "メンバー"
         }()
         let color = (pp?.colorHex).flatMap { $0.isEmpty ? nil : $0 } ?? "#8E8E93"
-        let rn: String? = {
-            guard let id = p.userIdentity.userRecordID?.recordName,
-                  !id.isEmpty,
-                  id != "_defaultOwner_", id != "__defaultOwner__" else { return nil }
-            return id
-        }()
-        return ParticipantInfo(name: name, colorHex: color, photoData: pp?.photoData, recordName: rn)
+        return ParticipantInfo(name: name, colorHex: color, photoData: pp?.photoData, recordName: p.budgetyCanonicalID)
     }
 
     /// 参加者を選択した時、ローカルに対応する Member が居れば再利用、なければ作成して `selected` に紐づける。
@@ -672,6 +722,39 @@ struct MemberPickerView: View {
         }
         share = ShareCoordinator.shared.existingShare(for: record)
         // ParticipantProfile は CloudKit Sharing 経由で自動同期されるためここでは何もしない
+    }
+}
+
+// MARK: - Canonical ID for share participants
+
+extension CKShare.Participant {
+    /// 共有相手を全端末で一意に識別するための文字列。
+    /// `Expense.payerProfileID` や `Member.recordName` に保存し、シート参加者間で
+    /// 「払った相手」が解決できるようにする。
+    /// - role == .owner: userIdentity.userRecordID.recordName をそのまま使う。
+    ///   CKShare ではオーナー自身の view では `__defaultOwner__` placeholder に
+    ///   なるが、その場合は呼び出し側 (UserProfileStore.canonicalSelfID) で
+    ///   CKContainer.userRecordID().recordName を使うので nil を返す。
+    /// - role != .owner: lookupInfo.emailAddress (= 招待時の Apple ID) を使う。
+    ///   CKShare 内で参加者の userRecordID は viewer ごとに別空間になるが、
+    ///   email は全 viewer から同一値で見える唯一の安定キー。
+    var budgetyCanonicalID: String? {
+        let rn = userIdentity.userRecordID?.recordName ?? ""
+        if role == .owner {
+            if UserProfileStore.isSelfPlaceholderRecordName(rn) { return nil }
+            return rn.isEmpty ? nil : rn
+        }
+        if let email = userIdentity.lookupInfo?.emailAddress, !email.isEmpty {
+            return "email:" + email.lowercased()
+        }
+        if let phone = userIdentity.lookupInfo?.phoneNumber, !phone.isEmpty {
+            return "phone:" + phone
+        }
+        // フォールバック: 旧来通り recordName (placeholder でなければ)
+        if !rn.isEmpty, !UserProfileStore.isSelfPlaceholderRecordName(rn) {
+            return rn
+        }
+        return nil
     }
 }
 

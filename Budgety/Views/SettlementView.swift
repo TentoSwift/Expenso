@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 /// 集計対象の期間プリセット。
 enum SettlementPeriod: String, CaseIterable, Identifiable {
@@ -29,8 +30,10 @@ enum SettlementPeriod: String, CaseIterable, Identifiable {
 struct SettlementView: View {
     @ObservedObject var record: ExpenseSheet
     @ObservedObject private var fx = FXRatesService.shared
+    @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var profile = UserProfileStore.shared
     @State private var result: SettlementResult?
+    @State private var pendingMerge: (pid: String, name: String)?
 
     @State private var period: SettlementPeriod = .all
     /// custom 用。デフォルトは「今月」相当。
@@ -82,6 +85,76 @@ struct SettlementView: View {
         .onChange(of: period) { _, _ in recompute() }
         .onChange(of: customStart) { _, _ in if period == .custom { recompute() } }
         .onChange(of: customEnd) { _, _ in if period == .custom { recompute() } }
+        .confirmationDialog(
+            pendingMerge.map { "\($0.name) を自分に統合しますか？" } ?? "",
+            isPresented: Binding(
+                get: { pendingMerge != nil },
+                set: { if !$0 { pendingMerge = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("統合する", role: .destructive) {
+                if let pm = pendingMerge {
+                    mergeIntoSelf(profileID: pm.pid)
+                }
+                pendingMerge = nil
+            }
+            Button("キャンセル", role: .cancel) {
+                pendingMerge = nil
+            }
+        } message: {
+            Text("このシート配下で、選んだメンバーが支払者・受益者になっている全ての支出・定期項目・テンプレを自分の ID に書き換えます。元には戻せません。")
+        }
+    }
+
+    /// 別 ID で記録されている「同じ自分」を canonical self に統合する。
+    /// 1) 全 Expense / RecurringRule / ExpenseTemplate の payerProfileID を書き換え
+    /// 2) 全 Expense の beneficiaryProfileIDs (CSV) 内の対象 ID も書き換え
+    /// 3) 該当する ParticipantProfile を削除 (= 重複メンバーをシートから除く)
+    @MainActor
+    private func mergeIntoSelf(profileID stalePID: String) {
+        let share = ShareCoordinator.shared.existingShare(for: record)
+        guard let canonical = profile.canonicalSelfID(forShare: share),
+              !canonical.isEmpty, canonical != stalePID else { return }
+        let ctx = viewContext
+
+        // 1) Expense
+        let expReq = NSFetchRequest<Expense>(entityName: "Expense")
+        expReq.predicate = NSPredicate(format: "sheet == %@", record)
+        let expenses = (try? ctx.fetch(expReq)) ?? []
+        for e in expenses {
+            if e.payerProfileID == stalePID {
+                e.payerProfileID = canonical
+                if let mid = profile.selfMemberID { e.payerMemberID = mid }
+            }
+            // beneficiary CSV 置換
+            let list = e.beneficiaryIDList
+            if list.contains(stalePID) {
+                e.beneficiaryIDList = list.map { $0 == stalePID ? canonical : $0 }
+            }
+        }
+        // 2) RecurringRule
+        let ruleReq = NSFetchRequest<RecurringRule>(entityName: "RecurringRule")
+        ruleReq.predicate = NSPredicate(format: "sheet == %@ AND payerProfileID == %@", record, stalePID)
+        for r in (try? ctx.fetch(ruleReq)) ?? [] {
+            r.payerProfileID = canonical
+        }
+        // 3) ExpenseTemplate
+        let tplReq = NSFetchRequest<ExpenseTemplate>(entityName: "ExpenseTemplate")
+        tplReq.predicate = NSPredicate(format: "sheet == %@ AND payerProfileID == %@", record, stalePID)
+        for t in (try? ctx.fetch(tplReq)) ?? [] {
+            t.payerProfileID = canonical
+            if let mid = profile.selfMemberID { t.payerMemberID = mid }
+        }
+        // 4) ParticipantProfile を削除 (= シートのメンバー一覧から除く)
+        if let pps = record.participantProfiles as? Set<ParticipantProfile> {
+            for pp in pps where pp.recordName == stalePID {
+                ctx.delete(pp)
+            }
+        }
+        PersistenceController.shared.save()
+        Haptics.success()
+        recompute()
     }
 
     @ViewBuilder
@@ -189,7 +262,9 @@ struct SettlementView: View {
     @ViewBuilder
     private func balanceRow(bal: MemberBalance, currencyCode: String) -> some View {
         let info = record.memberDisplayInfo(for: bal.profileID)
-        let isMe = profile.userRecordName == bal.profileID
+        let share = ShareCoordinator.shared.existingShare(for: record)
+        let selfIDs = profile.canonicalSelfIDs(forShare: share)
+        let isMe = selfIDs.contains(bal.profileID)
         HStack(spacing: 12) {
             AvatarView(
                 photoData: info.photoData,
@@ -206,6 +281,16 @@ struct SettlementView: View {
             Spacer()
             balanceLabel(amount: bal.amount, currencyCode: currencyCode)
                 .monospacedDigit()
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            if !isMe {
+                Button {
+                    pendingMerge = (bal.profileID, info.name)
+                } label: {
+                    Label("自分に統合する", systemImage: "arrow.merge")
+                }
+            }
         }
     }
 

@@ -308,12 +308,19 @@ final class PersistenceController: ObservableObject {
 
     /// 既存 Member の denormalized プロフィール (= name / colorHex / photoData) を、
     /// 同じ Apple ID (recordName 一致) を持つ最新の ParticipantProfile に揃える。
-    /// 加えて、Member.recordName が空のまま放置されている古いデータには PP から逆引きで
-    /// recordName を補完する (= 同名一致)。
     ///
-    /// これで「同じ支払者なのにアイコンが古い/別人」「編集画面で選択されない」を解消する。
+    /// 注意: かつてあった「Member.recordName が空 → 同名 PP から借りる」逆引き同期は
+    /// 削除した。汎用名 ("自分" / "メンバー" 等) のとき別人の PP を誤って拾い、self Member に
+    /// 他人の recordName を書き込む不具合を引き起こすため。recordName は picker か
+    /// migration が canonical 経由で書き込む。
+    ///
+    /// PP 機能は現在無効化されているので関数全体を早期 return。残骸の Member 同期で
+    /// 不整合が出ないようにする。再度有効化する場合は BuildInfo.profileFeatureEnabled を
+    /// 参照する gate を入れること。
     /// 起動時に毎回走らせるが、O(M + P) で軽量。
     private func syncMembersFromParticipantProfiles() {
+        return // PP feature disabled; rely on canonical IDs from picker / migration.
+        // swiftlint:disable:next unreachable_code
         let ctx = container.viewContext
         let ppReq = NSFetchRequest<ParticipantProfile>(entityName: "ParticipantProfile")
         guard let allPPs = try? ctx.fetch(ppReq), !allPPs.isEmpty else { return }
@@ -331,31 +338,10 @@ final class PersistenceController: ObservableObject {
                 latestByRecordName[rn] = pp
             }
         }
-        // displayName → 最新 PP (recordName 逆引きの補助用)
-        var latestByName: [String: ParticipantProfile] = [:]
-        for pp in allPPs {
-            guard let n = pp.displayName, !n.isEmpty,
-                  let rn = pp.recordName, !rn.isEmpty else { continue }
-            let cur = latestByName[n]
-            let curAt = cur?.updatedAt ?? .distantPast
-            let ppAt = pp.updatedAt ?? .distantPast
-            if cur == nil || ppAt > curAt {
-                latestByName[n] = pp
-            }
-            _ = rn
-        }
 
         var didChange = false
         for member in allMembers {
-            // 1) Member.recordName が空 → 同名 PP から借りる
-            if (member.recordName ?? "").isEmpty,
-               let name = member.name, !name.isEmpty,
-               let pp = latestByName[name],
-               let rn = pp.recordName, !rn.isEmpty {
-                member.recordName = rn
-                didChange = true
-            }
-            // 2) recordName 一致 → 最新 PP の displayName / colorHex / photoData を Member に同期
+            // recordName 一致 → 最新 PP の displayName / colorHex / photoData を Member に同期
             guard let rn = member.recordName, !rn.isEmpty,
                   let pp = latestByRecordName[rn] else { continue }
             if let dn = pp.displayName, !dn.isEmpty, member.name != dn {

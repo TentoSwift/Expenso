@@ -286,7 +286,8 @@ final class SheetAIChat: ObservableObject {
                 let dateLabel = formatDate(e.date ?? .now)
                 let kindLabel = e.kind == .income ? "収入" : "支出"
                 let category = e.categoryDisplayName
-                let payer = e.paidBy?.isEmpty == false ? e.paidBy! : "未指定"
+                let resolved = e.displayPaidBy
+                let payer = resolved.isEmpty ? "未指定" : resolved
                 let title = e.displayTitle.isEmpty ? "(無題)" : e.displayTitle
                 let signed = signedAmount(value: e.amountDecimal, kind: e.kind, code: e.resolvedCurrencyCode)
                 lines.append("  - \(dateLabel) [\(kindLabel)] \(title) (\(category)): \(signed) / \(payer)")

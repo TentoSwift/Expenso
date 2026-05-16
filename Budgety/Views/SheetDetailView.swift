@@ -54,6 +54,7 @@ struct SheetDetailView: View {
 
     @State private var period: Period = .thisMonth
     @State private var showingAddExpense = false
+    @State private var showingCSVImport = false
     @State private var showingShare = false
     @State private var editingExpense: Expense?
     @State private var editingRule: RecurringRule?
@@ -266,6 +267,11 @@ struct SheetDetailView: View {
                     } label: {
                         Label("PDF レポート", systemImage: "doc.richtext")
                     }
+                    Button {
+                        showingCSVImport = true
+                    } label: {
+                        Label("CSV を取り込む", systemImage: "square.and.arrow.down")
+                    }
                     Divider()
                     // 削除/離脱はオーナー or 参加者で分岐
                     if record.isOwnedByCurrentUser {
@@ -288,6 +294,9 @@ struct SheetDetailView: View {
         }
         .sheet(isPresented: $showingAddExpense) {
             AddExpenseView(record: record)
+        }
+        .sheet(isPresented: $showingCSVImport) {
+            CSVImportView(sheet: record)
         }
         .sheet(isPresented: $exportPaywall) {
             PaywallView()
@@ -596,7 +605,7 @@ struct SheetDetailView: View {
         copy.kindRaw = expense.kindRaw
         copy.currencyCode = expense.currencyCode
         copy.categoryRaw = expense.categoryRaw
-        copy.paidBy = expense.paidBy
+        copy.paidBy = nil
         copy.payerProfileID = expense.payerProfileID
         copy.date = .now
         copy.note = expense.note

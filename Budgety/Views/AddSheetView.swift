@@ -19,15 +19,7 @@ struct AddSheetView: View {
     @State private var defaultCurrencyCode: String = CurrencyCatalog.defaultCode
     @State private var budgetText: String = ""
 
-    /// AddSheetView を開いた時点でプロフィールが未設定だったかを記録。
-    /// 一度入力したら以降のシートでは出さない (= 「最初のシート作成時のみ」UX)。
-    @State private var needsProfileSetup: Bool
-
     @State private var showingPaywall: Bool = false
-
-    init() {
-        _needsProfileSetup = State(initialValue: UserProfileStore.shared.isEmpty)
-    }
 
     private let palette: [String] = [
         "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
@@ -35,9 +27,7 @@ struct AddSheetView: View {
     ]
 
     private var canSave: Bool {
-        let nameOk = !name.trimmingCharacters(in: .whitespaces).isEmpty
-        let profileOk = !needsProfileSetup || !profile.isEmpty
-        return nameOk && profileOk
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// JPY/KRW など最小単位のない通貨は decimalPad 不要
@@ -48,9 +38,6 @@ struct AddSheetView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if needsProfileSetup {
-                    profileSection
-                }
                 Section {
                     HStack {
                         Spacer()
@@ -121,9 +108,6 @@ struct AddSheetView: View {
             }
         }
     }
-
-    @ViewBuilder
-    private var profileSection: some View { EmptyView() }
 
     private var currencyPicker: some View {
         Picker("通貨", selection: $defaultCurrencyCode) {

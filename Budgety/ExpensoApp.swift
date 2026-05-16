@@ -17,12 +17,21 @@ struct ExpensoApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var shareToast: String?
     @State private var premiumExpiredAlertShown: Bool = false
+    /// 初回起動時のみオンボーディングを出す。UserDefaults 永続化。
+    @AppStorage("hasShownOnboarding") private var hasShownOnboarding: Bool = false
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environment(\.locale, Locale(identifier: "ja_JP"))
+                .sheet(isPresented: Binding(
+                    get: { !hasShownOnboarding },
+                    set: { if !$0 { hasShownOnboarding = true } }
+                )) {
+                    OnboardingView { hasShownOnboarding = true }
+                        .interactiveDismissDisabled()
+                }
                 .overlay(alignment: .top) {
                     if let shareToast {
                         Text(shareToast)
@@ -74,6 +83,12 @@ struct ExpensoApp: App {
                         UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
                         UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)
                     }
+                    // 過去の PP 逆引きで self Member.recordName に他人の ID が紛れた可能性を
+                    // ケアするための one-shot 正規化 (= canonical 経由で再判定)。
+                    UserProfileStore.shared.sanitizeSelfMemberRecordName(in: ctx)
+                    // 共有シートで `payerProfileID == 自分の旧 userRecordName` になっている
+                    // 行を canonical (email ベース等) に自動マイグレートする。
+                    UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
                     // 定期項目の未生成 occurrence を Expense に展開
                     RecurringExpenseGenerator.generateAll(in: ctx)
                     // v0.x で UserDefaults に格納していたシートロック情報を Core Data 側へ移行

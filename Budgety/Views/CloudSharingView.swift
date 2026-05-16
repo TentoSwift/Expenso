@@ -15,7 +15,6 @@ struct CloudSharingView: View {
     @StateObject private var purchaseManager = PurchaseManager.shared
 
     @State private var email: String = ""
-    @State private var permission: CKShare.ParticipantPermission = .readWrite
     @State private var isProcessing: Bool = false
     @State private var errorMessage: String?
     @State private var iCloudHint: String?
@@ -220,14 +219,28 @@ struct CloudSharingView: View {
 
     private var groupHeader: some View {
         Section {
-            Label {
-                Text(record.displayName).bold()
-            } icon: {
-                Image(systemName: "person.2.circle.fill")
-                    .foregroundStyle(Color(hex: record.displayColorHex) ?? .blue)
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(record.tint.gradient)
+                        .frame(width: 76, height: 76)
+                        .shadow(color: record.tint.opacity(0.35), radius: 10, y: 4)
+                    Image(systemName: record.symbol ?? "person.2.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(spacing: 2) {
+                    Text(record.displayName)
+                        .font(.title3.weight(.semibold))
+                    Text("既定通貨 \(record.resolvedDefaultCurrencyCode)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-        } footer: {
-            Text("メールアドレスから iCloud アカウントを検索し、権限を付与した上で招待します。受け取った相手は同期で参加できます。")
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
     }
 
@@ -301,44 +314,32 @@ struct CloudSharingView: View {
     }
 
     private var inviteSection: some View {
-        Group {
-            Section("招待先のメールアドレス") {
-                TextField("name@icloud.com", text: $email)
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-
-            Section("権限") {
-                Picker("権限", selection: $permission) {
-                    Text("編集可能").tag(CKShare.ParticipantPermission.readWrite)
-                    Text("閲覧のみ").tag(CKShare.ParticipantPermission.readOnly)
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section {
-                Button {
-                    Task { await sendInvitation() }
-                } label: {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "paperplane.fill")
-                        }
-                        Text(isProcessing ? "招待を準備中..." : "権限を付与して招待を送る")
+        Section {
+            TextField("name@icloud.com", text: $email)
+                .keyboardType(.emailAddress)
+                .textContentType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button {
+                Task { await sendInvitation() }
+            } label: {
+                HStack {
+                    if isProcessing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "paperplane.fill")
                     }
-                    .frame(maxWidth: .infinity)
+                    Text(isProcessing ? "招待を準備中..." : "招待を送る")
+                        .fontWeight(.semibold)
+                    Spacer()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(isProcessing || !isValidEmail)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            } footer: {
-                Text("招待先の Apple ID に登録済みのメールアドレスを入力してください。iCloud に登録されていないアドレスでは招待できません。")
+                .foregroundStyle(isValidEmail ? Color.accentColor : Color.secondary)
             }
+            .disabled(isProcessing || !isValidEmail)
+        } header: {
+            Text("人を招待")
+        } footer: {
+            Text("招待先の Apple ID に登録済みメールアドレスを入力してください。参加者はシートを編集できます (閲覧のみは廃止)。")
         }
     }
 
@@ -439,7 +440,7 @@ struct CloudSharingView: View {
         do {
             let result = try await ShareCoordinator.shared.invite(
                 email: trimmedEmail,
-                permission: permission,
+                permission: .readWrite,
                 to: record
             )
             existingShare = result.share
@@ -518,11 +519,20 @@ private struct ParticipantRow: View {
     }
 
     /// この行が現在の iCloud ユーザー (= 自分) を表すか。
-    /// CKShare の currentUserParticipant と同じ判定になるよう userRecordName で比較する。
-    /// 自分がオーナーの場合、CKShare 上の recordName は `_defaultOwner_` プレースホルダ
-    /// になるため、role == .owner + sheet が自分の所有 もケースとして拾う。
+    /// CKShare では「見ている本人」のエントリは userRecordID.recordName が `__defaultOwner__`
+    /// placeholder になるため、それも自分扱い。さらに canonical (= participant.budgetyCanonicalID
+    /// と canonicalSelfIDs の交点) でもマッチする。
     private var isSelf: Bool {
-        if let myRN = userProfile.userRecordName, !myRN.isEmpty, recordName == myRN {
+        let rn = participant.userIdentity.userRecordID?.recordName ?? ""
+        if rn == "__defaultOwner__" || rn == "_defaultOwner_" {
+            return true
+        }
+        let share = ShareCoordinator.shared.existingShare(for: sheet)
+        let selfIDs = userProfile.canonicalSelfIDs(forShare: share)
+        if let cid = participant.budgetyCanonicalID, selfIDs.contains(cid) {
+            return true
+        }
+        if let myRN = userProfile.userRecordName, !myRN.isEmpty, rn == myRN {
             return true
         }
         if participant.role == .owner, sheet.isOwnedByCurrentUser {
@@ -546,10 +556,25 @@ private struct ParticipantRow: View {
     }
 
     /// このシート配下に居る、この participant に対応する ParticipantProfile を引く。
+    /// PP.recordName は canonical ID (オーナーなら userRecordName、参加者なら "email:...")
+    /// で書かれているため、まず canonical で引き、失敗したら旧スキーマ (raw userRecordID)
+    /// でもマッチさせる。自分の行は canonicalSelfIDs の集合で複数候補を試す。
     private var participantProfile: ParticipantProfile? {
-        guard let rn = recordName,
-              let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
-        return profiles.first(where: { $0.recordName == rn })
+        guard let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
+        var candidates: Set<String> = []
+        if let cid = participant.budgetyCanonicalID, !cid.isEmpty {
+            candidates.insert(cid)
+        }
+        if let rn = recordName { candidates.insert(rn) }
+        if isSelf {
+            let share = ShareCoordinator.shared.existingShare(for: sheet)
+            candidates.formUnion(userProfile.canonicalSelfIDs(forShare: share))
+        }
+        guard !candidates.isEmpty else { return nil }
+        return profiles.first(where: {
+            guard let rn = $0.recordName, !rn.isEmpty else { return false }
+            return candidates.contains(rn)
+        })
     }
 
     private var isAccepted: Bool {
@@ -563,18 +588,18 @@ private struct ParticipantRow: View {
         if isSelf {
             return userProfile.resolvedDisplayName
         }
-        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
+        // 参加者: PP > nameComponents > email > phone > メンバー の順。
+        // (旧コードは accepted 限定 + pending の場合 email 直行で PP より email が優先されていた)
+        if let n = participantProfile?.displayName, !n.isEmpty {
             return n
         }
-        if participant.acceptanceStatus == .pending, let email = emailAddress {
-            return email
+        if let nc = participant.userIdentity.nameComponents {
+            let formatted = PersonNameComponentsFormatter().string(from: nc)
+            if !formatted.isEmpty { return formatted }
         }
         if let info = participant.userIdentity.lookupInfo {
             if let email = info.emailAddress { return email }
             if let phone = info.phoneNumber { return phone }
-        }
-        if let nc = participant.userIdentity.nameComponents {
-            return PersonNameComponentsFormatter().string(from: nc)
         }
         return "メンバー"
     }
@@ -583,7 +608,9 @@ private struct ParticipantRow: View {
         if isSelf {
             return emailAddress
         }
-        if isAccepted, let n = participantProfile?.displayName, !n.isEmpty {
+        // PP の displayName を出している時は補助行として email を出す
+        // (PP 名がニックネームの場合に「本物の人」が分かるように)
+        if let n = participantProfile?.displayName, !n.isEmpty {
             return emailAddress
         }
         return nil
@@ -593,7 +620,7 @@ private struct ParticipantRow: View {
         if isSelf, let hex = userProfile.avatarBgColorHex, !hex.isEmpty {
             return hex
         }
-        if isAccepted, let hex = participantProfile?.colorHex, !hex.isEmpty {
+        if let hex = participantProfile?.colorHex, !hex.isEmpty {
             return hex
         }
         switch participant.role {
@@ -674,29 +701,26 @@ private struct ParticipantRow: View {
                 }
                 Spacer()
             }
-            if isOwnerView, participant.role != .owner {
-                HStack {
-                    Picker("権限", selection: Binding(
-                        get: { participant.permission },
-                        set: { newValue in Task { await onPermissionChange(newValue) } }
-                    )) {
-                        Text("編集可能").tag(CKShare.ParticipantPermission.readWrite)
-                        Text("閲覧のみ").tag(CKShare.ParticipantPermission.readOnly)
+            // 「編集可能」固定: 権限ピッカーは廃止し、ラベルだけ表示する。
+            if participant.role != .owner {
+                HStack(spacing: 8) {
+                    Label("編集可能", systemImage: "pencil.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.green)
+                        .labelStyle(.titleAndIcon)
+                    Spacer()
+                    if isOwnerView {
+                        Button(role: .destructive) {
+                            Task { await onRemove() }
+                        } label: {
+                            Label("削除", systemImage: "person.crop.circle.badge.minus")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .tint(.red)
                     }
-                    .pickerStyle(.segmented)
-                    Button(role: .destructive) {
-                        Task { await onRemove() }
-                    } label: {
-                        Image(systemName: "person.crop.circle.badge.minus")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.borderless)
                 }
-            } else if !isOwnerView, participant.role != .owner {
-                Text(participant.permission == .readWrite ? "編集可能" : "閲覧のみ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 52)
+                .padding(.leading, 52)
             }
         }
         .padding(.vertical, 4)

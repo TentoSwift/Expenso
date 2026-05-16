@@ -5,6 +5,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 struct EditTemplateView: View {
     enum Mode {
@@ -260,8 +261,9 @@ struct EditTemplateView: View {
         tpl.kindRaw = kind.rawValue
         tpl.currencyCode = currencyCode
         tpl.categoryRaw = selectedCategory?.name
-        tpl.paidBy = selectedPayer?.name
-        tpl.payerProfileID = selectedPayer?.profileID
+        let share = contextSheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+        tpl.paidBy = nil
+        tpl.payerProfileID = selectedPayer?.resolvedProfileID(forShare: share)
         tpl.payerMemberID = selectedPayer?.id
         tpl.note = note
     }
