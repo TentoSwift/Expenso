@@ -122,6 +122,9 @@ struct ExpensoApp: App {
                         UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
                         // CKShare の participant 情報も再ハイドレート (新 PP が syc されてきた可能性)
                         UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                        // 旧 canonical (email:...) → URN 移行も remote change で再実行
+                        // (CKShare メタデータが遅延ロードされた後に走らせる)
+                        UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
