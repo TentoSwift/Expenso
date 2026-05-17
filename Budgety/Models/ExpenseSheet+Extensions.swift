@@ -138,13 +138,15 @@ extension ExpenseSheet {
     }
 
     /// profileID を表示用情報に解決する。
-    /// 1. 自分 (UserProfileStore.userRecordName 一致)
-    /// 2. Public DB キャッシュ (`PublicProfileSync`) — displayName / photo の source of truth
-    /// 3. ParticipantProfile.recordName 一致 (= 共有相手のプロフィール / 色)
-    /// 4. ローカル Member の recordName 一致
-    /// 5. ローカル Member の id (UUID) 一致 (旧データ救済)
+    /// 1. 自分 (UserProfileStore.userRecordName 一致) → UserProfileStore
+    /// 2. **CKShare の参加者を毎回参照** → Apple ID 名 (nameComponents)
+    ///    (iCloud Extended Share Access エンタイトルメントで取れる)
+    /// 3. ParticipantProfile.recordName 一致 (= CKShare 取得前のフォールバック)
+    /// 4. ローカル Member の recordName / UUID 一致 (旧データ救済)
     /// いずれにも一致しなければ "メンバー" の汎用表示。
-    /// 色 (colorHex) は Public DB に乗せていないので PP からのみ取得する。
+    ///
+    /// 名前は PP に書き溜めず、その都度 CKShare から取得する方針。
+    /// 色は CKShare からは取れないので PP の colorHex を併用する (なければ既定灰)。
     @MainActor
     func memberDisplayInfo(for profileID: String) -> (name: String, colorHex: String, photoData: Data?) {
         if let myRN = UserProfileStore.shared.userRecordName, profileID == myRN {
@@ -152,25 +154,28 @@ extension ExpenseSheet {
             return (
                 name: store.resolvedDisplayName,
                 colorHex: store.avatarBgColorHex ?? "#5B8DEF",
-                photoData: store.photoData
+                photoData: nil
             )
         }
-        // 2) Public DB cache (displayName / photo)
         let profiles = (participantProfiles as? Set<ParticipantProfile>) ?? []
         let ppMatch = profiles.first(where: { $0.recordName == profileID })
-        if let cached = PublicProfileSync.shared.profileOrPrefetch(for: profileID) {
-            let name = cached.displayName.isEmpty
-                ? (ppMatch?.displayName?.isEmpty == false ? ppMatch!.displayName! : "メンバー")
-                : cached.displayName
-            let color = (ppMatch?.colorHex?.isEmpty == false ? ppMatch!.colorHex! : "#8E8E93")
-            let photo = cached.photoData ?? ppMatch?.photoData
-            return (name: name, colorHex: color, photoData: photo)
+        let fallbackColor = (ppMatch?.colorHex?.isEmpty == false ? ppMatch!.colorHex! : "#8E8E93")
+
+        // 2) CKShare から都度引き直す (Apple ID 名)
+        #if !os(watchOS)
+        if let share = ShareCoordinator.shared.existingShare(for: self),
+           let liveName = nameFromShare(share, profileID: profileID),
+           !liveName.isEmpty {
+            return (name: liveName, colorHex: fallbackColor, photoData: nil)
         }
+        #endif
+
+        // 3) PP フォールバック (CKShare 未取得タイミング用)
         if let pp = ppMatch {
             return (
                 name: pp.displayName?.isEmpty == false ? pp.displayName! : "メンバー",
-                colorHex: pp.colorHex?.isEmpty == false ? pp.colorHex! : "#8E8E93",
-                photoData: pp.photoData
+                colorHex: fallbackColor,
+                photoData: nil
             )
         }
         // ローカル Member へのフォールバック (recordName / UUID)
@@ -191,4 +196,30 @@ extension ExpenseSheet {
         }
         return (name: "メンバー", colorHex: "#8E8E93", photoData: nil)
     }
+
+    #if !os(watchOS)
+    /// `share` の owner / participants から `profileID` (URN) と一致するエントリを探し、
+    /// その `userIdentity.nameComponents` をフォーマットして返す。
+    /// `__defaultOwner__` placeholder の自分は別途 UserProfileStore で扱うので無視。
+    @MainActor
+    private func nameFromShare(_ share: CKShare, profileID: String) -> String? {
+        let fmt = PersonNameComponentsFormatter()
+        fmt.style = .default
+        // owner
+        let ownerRN = share.owner.userIdentity.userRecordID?.recordName ?? ""
+        if !UserProfileStore.isSelfPlaceholderRecordName(ownerRN), ownerRN == profileID,
+           let comps = share.owner.userIdentity.nameComponents {
+            return fmt.string(from: comps)
+        }
+        // participants
+        for p in share.participants {
+            let rn = p.userIdentity.userRecordID?.recordName ?? ""
+            if UserProfileStore.isSelfPlaceholderRecordName(rn) { continue }
+            if rn == profileID, let comps = p.userIdentity.nameComponents {
+                return fmt.string(from: comps)
+            }
+        }
+        return nil
+    }
+    #endif
 }
