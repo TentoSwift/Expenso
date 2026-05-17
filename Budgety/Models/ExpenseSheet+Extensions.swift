@@ -139,10 +139,12 @@ extension ExpenseSheet {
 
     /// profileID を表示用情報に解決する。
     /// 1. 自分 (UserProfileStore.userRecordName 一致)
-    /// 2. ParticipantProfile.recordName 一致 (= 共有相手のプロフィール)
-    /// 3. ローカル Member の recordName 一致
-    /// 4. ローカル Member の id (UUID) 一致 (旧データ救済)
+    /// 2. Public DB キャッシュ (`PublicProfileSync`) — displayName / photo の source of truth
+    /// 3. ParticipantProfile.recordName 一致 (= 共有相手のプロフィール / 色)
+    /// 4. ローカル Member の recordName 一致
+    /// 5. ローカル Member の id (UUID) 一致 (旧データ救済)
     /// いずれにも一致しなければ "メンバー" の汎用表示。
+    /// 色 (colorHex) は Public DB に乗せていないので PP からのみ取得する。
     @MainActor
     func memberDisplayInfo(for profileID: String) -> (name: String, colorHex: String, photoData: Data?) {
         if let myRN = UserProfileStore.shared.userRecordName, profileID == myRN {
@@ -153,8 +155,18 @@ extension ExpenseSheet {
                 photoData: store.photoData
             )
         }
+        // 2) Public DB cache (displayName / photo)
         let profiles = (participantProfiles as? Set<ParticipantProfile>) ?? []
-        if let pp = profiles.first(where: { $0.recordName == profileID }) {
+        let ppMatch = profiles.first(where: { $0.recordName == profileID })
+        if let cached = PublicProfileSync.shared.profileOrPrefetch(for: profileID) {
+            let name = cached.displayName.isEmpty
+                ? (ppMatch?.displayName?.isEmpty == false ? ppMatch!.displayName! : "メンバー")
+                : cached.displayName
+            let color = (ppMatch?.colorHex?.isEmpty == false ? ppMatch!.colorHex! : "#8E8E93")
+            let photo = cached.photoData ?? ppMatch?.photoData
+            return (name: name, colorHex: color, photoData: photo)
+        }
+        if let pp = ppMatch {
             return (
                 name: pp.displayName?.isEmpty == false ? pp.displayName! : "メンバー",
                 colorHex: pp.colorHex?.isEmpty == false ? pp.colorHex! : "#8E8E93",

@@ -60,6 +60,7 @@
 				"Support/Color+Hex.swift",
 				Support/Currency.swift,
 				Support/Notifications.swift,
+				Support/PublicProfileSync.swift,
 				Support/SheetLockManager.swift,
 				UserProfileStore.swift,
 			);
@@ -91,6 +92,7 @@
 				"Support/Color+Hex.swift",
 				Support/Currency.swift,
 				Support/Notifications.swift,
+				Support/PublicProfileSync.swift,
 				Support/SettlementCalculator.swift,
 				Support/ShareParticipantCanonical.swift,
 				UserProfileStore.swift,

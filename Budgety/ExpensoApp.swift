@@ -89,6 +89,13 @@ struct ExpensoApp: App {
                     // 共有シートで `payerProfileID == 自分の旧 userRecordName` になっている
                     // 行を canonical (email ベース等) に自動マイグレートする。
                     UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
+                    // Public DB の自分プロフィールを最新化 + 全シートの参加者プロフィールを prefetch
+                    await PublicProfileSync.shared.uploadOwnProfile(
+                        urn: UserProfileStore.shared.userRecordName ?? "",
+                        displayName: UserProfileStore.shared.resolvedDisplayName,
+                        photoData: UserProfileStore.shared.photoData
+                    )
+                    await prefetchAllParticipantProfiles(in: ctx)
                     // 定期項目の未生成 occurrence を Expense に展開
                     RecurringExpenseGenerator.generateAll(in: ctx)
                     // v0.x で UserDefaults に格納していたシートロック情報を Core Data 側へ移行
@@ -148,6 +155,30 @@ struct ExpensoApp: App {
         withAnimation { shareToast = message }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             withAnimation { shareToast = nil }
+        }
+    }
+
+    /// 全シートの ParticipantProfile.recordName (= 共有相手の URN を含む) を集めて
+    /// Public DB から fetch する。背景処理。
+    @MainActor
+    private func prefetchAllParticipantProfiles(in ctx: NSManagedObjectContext) async {
+        let req = NSFetchRequest<ParticipantProfile>(entityName: "ParticipantProfile")
+        let pps = (try? ctx.fetch(req)) ?? []
+        var urns: Set<String> = []
+        for pp in pps {
+            guard let rn = pp.recordName, !rn.isEmpty,
+                  rn != "_defaultOwner_", rn != "__defaultOwner__" else { continue }
+            // "email:..." 形式はまだ Phase 1 では Public DB キーに使えないので除外
+            // (Phase 2 で URN に統一する)
+            if rn.hasPrefix("email:") || rn.hasPrefix("phone:") { continue }
+            urns.insert(rn)
+        }
+        // 自分の URN も refresh しておく
+        if let own = UserProfileStore.shared.userRecordName, !own.isEmpty {
+            urns.insert(own)
+        }
+        if !urns.isEmpty {
+            await PublicProfileSync.shared.fetchProfiles(forURNs: Array(urns))
         }
     }
 }

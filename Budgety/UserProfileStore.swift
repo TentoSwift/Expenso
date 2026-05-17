@@ -106,6 +106,7 @@ final class UserProfileStore: ObservableObject {
         selfMemberID = nil
         userRecordName = nil
         profileUpdatedAt = nil
+        PublicProfileSync.shared.clearCache()
     }
 
     // MARK: - Local file helpers
@@ -132,11 +133,20 @@ final class UserProfileStore: ObservableObject {
 
     /// 自分のプロフィールを更新する。`profileUpdatedAt` を `.now` に進めて
     /// PP との LWW 比較に使えるようにする。
+    /// 同時に Public DB (PublicProfileSync) にも背景で upload する。
     func updateProfile(displayName: String, photoData: Data?, avatarBgColorHex: String?) {
         self.displayName = displayName
         self.photoData = photoData
         self.avatarBgColorHex = avatarBgColorHex
         self.profileUpdatedAt = .now
+        // 背景で Public DB に push (失敗してもローカル状態は更新済み)
+        if let urn = userRecordName, !urn.isEmpty {
+            Task { [resolvedDisplayName, photoData] in
+                await PublicProfileSync.shared.uploadOwnProfile(
+                    urn: urn, displayName: resolvedDisplayName, photoData: photoData
+                )
+            }
+        }
     }
 
     // MARK: - User record name fetch
