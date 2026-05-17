@@ -96,6 +96,9 @@ struct ExpensoApp: App {
                         photoData: UserProfileStore.shared.photoData
                     )
                     await prefetchAllParticipantProfiles(in: ctx)
+                    #if DEBUG
+                    diagnoseAllShares(in: ctx)
+                    #endif
                     // 定期項目の未生成 occurrence を Expense に展開
                     RecurringExpenseGenerator.generateAll(in: ctx)
                     // v0.x で UserDefaults に格納していたシートロック情報を Core Data 側へ移行
@@ -179,6 +182,19 @@ struct ExpensoApp: App {
         }
         if !urns.isEmpty {
             await PublicProfileSync.shared.fetchProfiles(forURNs: Array(urns))
+        }
+    }
+
+    /// DEBUG: 全シートの CKShare 参加者から取得可能な identity 情報をログ出力。
+    /// `com.apple.developer.icloud-extended-share-access` エンタイトルメント追加後の
+    /// 挙動確認用 (Console.app の category=ShareDiagnostics でフィルタ可)。
+    @MainActor
+    private func diagnoseAllShares(in ctx: NSManagedObjectContext) {
+        let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        let sheets = (try? ctx.fetch(req)) ?? []
+        for s in sheets {
+            guard let share = ShareCoordinator.shared.existingShare(for: s) else { continue }
+            ShareParticipantDiagnostics.dump(share: share, context: s.displayName)
         }
     }
 }
