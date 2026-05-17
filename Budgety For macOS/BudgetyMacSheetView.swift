@@ -48,6 +48,7 @@ struct BudgetyMacSheetView: View {
         ScrollView {
             VStack(spacing: 20) {
                 summaryHero
+                membersStrip
                 expensesList
             }
             .padding(20)
@@ -104,6 +105,36 @@ struct BudgetyMacSheetView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(sheet.tint.opacity(0.12))
         )
+    }
+
+    /// シートの参加者一覧 (Apple ID 名 + アバター)。
+    /// 名前が "メンバー" になっていれば PP/CKShare がまだ来ていない or
+    /// エンタイトルメントの効果が及んでいない可能性あり。
+    private var membersStrip: some View {
+        let ids = sheet.allMemberProfileIDs()
+        return HStack(spacing: 12) {
+            ForEach(ids, id: \.self) { id in
+                let info = sheet.memberDisplayInfo(for: id)
+                VStack(spacing: 4) {
+                    Circle()
+                        .fill(Color(hex: info.colorHex) ?? .blue)
+                        .frame(width: 32, height: 32)
+                        .overlay {
+                            Text(String(info.name.first ?? "?").uppercased())
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                        }
+                    Text(info.name)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: 80)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
     }
 
     private var expensesList: some View {

@@ -36,6 +36,22 @@ struct BudgetyMacApp: App {
                     await UserProfileStore.shared.refreshAppleIDName()
                     let ctx = persistenceController.container.viewContext
                     UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                    // CKShare がまだ非同期で取得中の可能性があるので、数秒後に再 hydrate
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        let ctx = persistenceController.container.viewContext
+                        if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
+                            await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                        }
+                        await UserProfileStore.shared.refreshAppleIDName()
+                        UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .expensoShareAccepted)) { note in
                     let title = (note.userInfo?["shareTitle"] as? String) ?? "共有"
