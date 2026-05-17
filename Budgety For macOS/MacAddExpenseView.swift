@@ -182,15 +182,42 @@ struct MacAddExpenseView: View {
 
     // MARK: - Pickers
 
+    @ViewBuilder
     private var payerPicker: some View {
-        Picker("支払い者", selection: $payerProfileID) {
-            ForEach(allMemberIDs, id: \.self) { id in
-                let info = sheet.memberDisplayInfo(for: id)
-                let label = selfIDSet.contains(id) ? "\(info.name) (自分)" : info.name
-                Text(label).tag(id)
+        ForEach(allMemberIDs, id: \.self) { id in
+            payerRow(id)
+        }
+    }
+
+    private func payerRow(_ id: String) -> some View {
+        let info = sheet.memberDisplayInfo(for: id)
+        let isMe = selfIDSet.contains(id)
+        let isOn = (payerProfileID == id)
+        return Button {
+            payerProfileID = id
+        } label: {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color(hex: info.colorHex) ?? .blue)
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Text(String(info.name.first ?? "?").uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                Text(isMe ? "\(info.name) (自分)" : info.name)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if isOn {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                } else {
+                    Image(systemName: "circle")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .pickerStyle(.menu)
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -236,6 +263,11 @@ struct MacAddExpenseView: View {
     @MainActor
     private func loadShareAndDefaults() async {
         share = ShareCoordinator.shared.existingShare(for: sheet)
+        // 開いた時点で Apple ID 名 + CKShare nameComponents を強制 hydrate
+        // (PP が未作成のタイミングで picker が "メンバー" のままになるのを防ぐ)
+        await UserProfileStore.shared.ensureUserRecordNameLoaded()
+        await UserProfileStore.shared.refreshAppleIDName()
+        UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: viewContext)
         guard !didLoad else { return }
         didLoad = true
         if let e = expense {
