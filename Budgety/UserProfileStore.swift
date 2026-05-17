@@ -27,41 +27,14 @@ final class UserProfileStore: ObservableObject {
         static let userRecordName     = "userProfile.userRecordName"
         /// ローカルプロフィールの最終更新時刻。ParticipantProfile.updatedAt との LWW 比較に使う。
         static let profileUpdatedAt   = "userProfile.profileUpdatedAt"
-        /// 過去に使っていた displayName のセット (rename 履歴、debugging 用)。
-        static let pastDisplayNames   = "userProfile.pastDisplayNames"
-        /// 「自分の ID」として確定済みの recordName / canonical 集合。
-        /// 主にユーザーが精算画面で「自分に統合」を実行した時に追加する。
-        /// canonicalSelfIDs(forShare:) と組み合わせて self 判定の母集合になる。
-        static let knownSelfIDs       = "userProfile.knownSelfIDs"
     }
     private static let photoFileName = "userProfile.photo.jpg"
     private static let containerID = "iCloud.com.tento.budgety"
 
     @Published var displayName: String {
         didSet {
-            // 名前が変わったら旧名を pastDisplayNames に保存
-            // (cross-device で旧名のまま残った PP を「自分」として吸収するため)。
-            let oldTrim = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let newTrim = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !oldTrim.isEmpty, oldTrim != newTrim, oldTrim != "自分" {
-                var past = pastDisplayNames
-                past.insert(oldTrim)
-                pastDisplayNames = past
-            }
             UserDefaults.standard.set(displayName, forKey: Keys.displayName)
             UserDefaults.standard.set(displayName, forKey: "displayName") // 後方互換
-        }
-    }
-
-    /// 過去に自分が使っていた displayName の集合 (rename 履歴)。
-    /// 「自分」「メンバー」など generic な名前は除外する想定。
-    var pastDisplayNames: Set<String> {
-        get {
-            let arr = (UserDefaults.standard.array(forKey: Keys.pastDisplayNames) as? [String]) ?? []
-            return Set(arr)
-        }
-        set {
-            UserDefaults.standard.set(Array(newValue), forKey: Keys.pastDisplayNames)
         }
     }
 
@@ -213,35 +186,12 @@ final class UserProfileStore: ObservableObject {
     /// マッチング用: backward compat のため `userRecordName` (CKContainer.userRecordID 由来の
     /// 旧 ID) と canonical の両方を含む集合を返す。古い Expense.payerProfileID が
     /// 残っていても「自分」として検出できるようにする。
-    /// さらに `knownSelfIDs` (= ユーザーが「自分に統合」で確定した過去 ID) も合算する。
+    /// 統合機能を廃止したため knownSelfIDs は使用しない (= デバイス間で不整合が起きるため)。
     func canonicalSelfIDs(forShare share: CKShare?) -> Set<String> {
-        var ids = knownSelfIDs
+        var ids: Set<String> = []
         if let urn = userRecordName, !urn.isEmpty { ids.insert(urn) }
         if let cid = canonicalSelfID(forShare: share), !cid.isEmpty { ids.insert(cid) }
         return ids
-    }
-
-    /// 「自分の ID」として確定済みの集合 (UserDefaults 永続化)。
-    var knownSelfIDs: Set<String> {
-        get {
-            let arr = (UserDefaults.standard.array(forKey: Keys.knownSelfIDs) as? [String]) ?? []
-            return Set(arr)
-        }
-        set {
-            UserDefaults.standard.set(Array(newValue), forKey: Keys.knownSelfIDs)
-        }
-    }
-
-    /// 指定 ID を「自分の ID」として記憶する。
-    /// 精算画面の「自分に統合」など、明示的な統合操作から呼ぶ。
-    func rememberAsSelfID(_ id: String) {
-        let trimmed = id.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty,
-              trimmed != "_defaultOwner_", trimmed != "__defaultOwner__" else { return }
-        var set = knownSelfIDs
-        if set.insert(trimmed).inserted {
-            knownSelfIDs = set
-        }
     }
 
     #if !os(watchOS)
@@ -314,10 +264,36 @@ final class UserProfileStore: ObservableObject {
                     toMemberID: selfMemberID
                 )
             }
+            // (3) beneficiaryProfileIDs (CSV) 内の自分の旧 ID を canonical に
+            if let urn = userRecordName, !urn.isEmpty, urn != canonical {
+                totalChanged += rewriteBeneficiaryCSV(in: ctx, sheet: s, fromID: urn, toID: canonical)
+            }
         }
         if totalChanged > 0 {
             try? ctx.save()
         }
+    }
+
+    /// Expense.beneficiaryProfileIDs (CSV) の中に `fromID` があれば `toID` に置換。
+    /// 重複削除は beneficiaryIDList の setter 側で行うのでここではしない。
+    private func rewriteBeneficiaryCSV(
+        in ctx: NSManagedObjectContext,
+        sheet: ExpenseSheet,
+        fromID: String,
+        toID: String
+    ) -> Int {
+        var changed = 0
+        let expReq = NSFetchRequest<Expense>(entityName: "Expense")
+        // CSV 内検索なので CONTAINS で初期絞り込み (false-positive あり得るので
+        // ループ内で正確に判定する)
+        expReq.predicate = NSPredicate(format: "sheet == %@ AND beneficiaryProfileIDs CONTAINS %@", sheet, fromID)
+        for e in (try? ctx.fetch(expReq)) ?? [] {
+            let list = e.beneficiaryIDList
+            guard list.contains(fromID) else { continue }
+            e.beneficiaryIDList = list.map { $0 == fromID ? toID : $0 }
+            changed += 1
+        }
+        return changed
     }
 
     /// `payerMemberID == selfMemberID` のものを canonical に揃える。

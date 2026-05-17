@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import CoreData
 import CloudKit
 
 /// 1 メンバーの net 残高 (= 立て替えた金額 - 自分の負担)。
@@ -39,6 +40,36 @@ struct SettlementResult {
     let missingRateCurrencies: Set<String>
     /// 計算に使用した支出件数 (収入はカウントされない)
     let includedExpenseCount: Int
+    /// 計算過程のデバッグ情報 (DEBUG ビルドでのみ populate)
+    let debugInfo: SettlementDebugInfo?
+}
+
+/// 精算ロジックのデバッグ情報。各 expense の集計過程を可視化する。
+struct SettlementDebugInfo {
+    /// 現在のシートのメンバー集合 (= 精算対象になる ID)
+    let memberSet: [String]
+    /// 自分の canonical
+    let selfCanonical: String
+    /// 自分とみなす ID 集合 (canonicalSelfIDs)
+    let selfIDs: [String]
+    /// 各 expense の集計過程
+    let expenseRows: [ExpenseRow]
+
+    struct ExpenseRow {
+        let id: String  // objectID URI など
+        let date: Date
+        let title: String
+        let rawPayer: String
+        let normalizedPayer: String
+        let amount: Decimal
+        let currencyCode: String
+        let convertedAmount: Decimal?
+        let rawBeneficiaries: [String]
+        let normalizedBeneficiaries: [String]
+        let perShare: Decimal?
+        let included: Bool
+        let skipReason: String?
+    }
 }
 
 enum SettlementCalculator {
@@ -68,16 +99,30 @@ enum SettlementCalculator {
             return nil
             #endif
         }()
-        // 自分の ID 集合 = canonicalSelfIDs (canonical + 旧 userRecordName + knownSelfIDs)
-        // 名前 / 写真ベースのヒューリスティックは別アカウント誤検出を生むため使わない。
-        // 重複は精算画面の context menu 「自分に統合」で明示的に解消 → 統合された ID は
-        // knownSelfIDs に記憶され、以後自動的に self として扱われる。
+        // 自分の ID 集合 = canonicalSelfIDs (canonical + 旧 userRecordName)。
+        // 名前 / 写真ベースのヒューリスティックや手動統合機能はデバイス間不整合を
+        // 生むため使わない (= ID で厳密に判定)。
         let selfIDs = UserProfileStore.shared.canonicalSelfIDs(forShare: share)
         let selfCanonical = UserProfileStore.shared.canonicalSelfID(forShare: share)
             ?? UserProfileStore.shared.userRecordName
             ?? ""
+        let selfMemberID = UserProfileStore.shared.selfMemberID
+        /// "ID を self に正規化": canonicalSelfIDs に含まれるなら selfCanonical に。
+        /// それ以外はそのまま。
         let normalize: (String) -> String = { pid in
             (!selfCanonical.isEmpty && selfIDs.contains(pid)) ? selfCanonical : pid
+        }
+        /// Expense の payer を解決:
+        /// 1. canonicalSelfIDs にあれば self
+        /// 2. Expense.payerMemberID == 自分の selfMemberID も self (同端末で書いた印)
+        /// 3. それ以外は raw payerProfileID をそのまま
+        let resolvePayer: (Expense) -> String? = { e in
+            guard let pid = e.payerProfileID, !pid.isEmpty else { return nil }
+            if !selfCanonical.isEmpty {
+                if selfIDs.contains(pid) { return selfCanonical }
+                if let mid = selfMemberID, e.payerMemberID == mid { return selfCanonical }
+            }
+            return pid
         }
 
         // メンバー集合 = 「現在のシートの参加者」だけ。
@@ -104,35 +149,102 @@ enum SettlementCalculator {
 
         var missing: Set<String> = []
         var includedCount = 0
+        var debugRows: [SettlementDebugInfo.ExpenseRow] = []
 
         for e in expenses {
             let from = e.resolvedCurrencyCode
-            guard let converted = fx.convert(e.amountDecimal, from: from, to: target) else {
+            let rawPayer = e.payerProfileID ?? ""
+            let rawBeneficiaries = e.resolvedBeneficiaryIDs()
+            let convertedOpt = fx.convert(e.amountDecimal, from: from, to: target)
+            var included = false
+            var skipReason: String? = nil
+            var normalizedPayer: String = ""
+            var normalizedBeneficiaries: [String] = []
+            var perShareOpt: Decimal? = nil
+
+            // 1) FX 換算
+            guard let converted = convertedOpt else {
                 missing.insert(from)
+                skipReason = "FX レート未取得 (\(from))"
+                debugRows.append(.init(
+                    id: e.objectID.uriRepresentation().absoluteString,
+                    date: e.date ?? .now, title: e.displayTitle,
+                    rawPayer: rawPayer, normalizedPayer: "",
+                    amount: e.amountDecimal, currencyCode: from,
+                    convertedAmount: nil,
+                    rawBeneficiaries: rawBeneficiaries, normalizedBeneficiaries: [],
+                    perShare: nil, included: false, skipReason: skipReason))
                 continue
             }
-            // 受益者 = expense.payerProfileID 由来の current 参加者のみ。
-            // 範囲外 ID は除外。残りが空なら skip。
-            let beneficiaries = e.resolvedBeneficiaryIDs()
-                .map(normalize)
-                .filter { memberSet.contains($0) }
-            guard !beneficiaries.isEmpty else { continue }
-            // payer 不明 (legacy / インポート) や 現参加者に居ない payer はスキップ
-            guard let rawPayer = e.payerProfileID, !rawPayer.isEmpty else { continue }
-            let payer = normalize(rawPayer)
-            guard memberSet.contains(payer) else { continue }
 
-            let count = Decimal(beneficiaries.count)
+            // 2) 受益者の正規化 + 現参加者フィルタ + dedup
+            // dedup は必須: 旧 URN と canonical が同じ人物にマップされる場合に
+            // 同じ人を 2 回カウントしないため。
+            do {
+                var seen = Set<String>()
+                normalizedBeneficiaries = rawBeneficiaries
+                    .map(normalize)
+                    .filter { memberSet.contains($0) && seen.insert($0).inserted }
+            }
+            guard !normalizedBeneficiaries.isEmpty else {
+                skipReason = "受益者が現参加者に居ない"
+                debugRows.append(.init(
+                    id: e.objectID.uriRepresentation().absoluteString,
+                    date: e.date ?? .now, title: e.displayTitle,
+                    rawPayer: rawPayer, normalizedPayer: normalize(rawPayer),
+                    amount: e.amountDecimal, currencyCode: from,
+                    convertedAmount: converted,
+                    rawBeneficiaries: rawBeneficiaries, normalizedBeneficiaries: [],
+                    perShare: nil, included: false, skipReason: skipReason))
+                continue
+            }
+
+            // 3) payer 解決
+            guard let payer = resolvePayer(e) else {
+                skipReason = "payerProfileID が空"
+                debugRows.append(.init(
+                    id: e.objectID.uriRepresentation().absoluteString,
+                    date: e.date ?? .now, title: e.displayTitle,
+                    rawPayer: rawPayer, normalizedPayer: "",
+                    amount: e.amountDecimal, currencyCode: from,
+                    convertedAmount: converted,
+                    rawBeneficiaries: rawBeneficiaries, normalizedBeneficiaries: normalizedBeneficiaries,
+                    perShare: nil, included: false, skipReason: skipReason))
+                continue
+            }
+            normalizedPayer = payer
+            guard memberSet.contains(payer) else {
+                skipReason = "payer が現参加者に居ない"
+                debugRows.append(.init(
+                    id: e.objectID.uriRepresentation().absoluteString,
+                    date: e.date ?? .now, title: e.displayTitle,
+                    rawPayer: rawPayer, normalizedPayer: payer,
+                    amount: e.amountDecimal, currencyCode: from,
+                    convertedAmount: converted,
+                    rawBeneficiaries: rawBeneficiaries, normalizedBeneficiaries: normalizedBeneficiaries,
+                    perShare: nil, included: false, skipReason: skipReason))
+                continue
+            }
+
+            // 4) 集計
+            let count = Decimal(normalizedBeneficiaries.count)
             let perShare = roundToCurrency(converted / count, code: target)
-            // 端数で converted と完全一致しない場合、payer は perShare * count しか回収できず、
-            // 差分は cash 上の損失として吸収する (= 残高は perShare * count で計算)
+            perShareOpt = perShare
             let allocatedTotal = perShare * count
-
             balances[payer, default: 0] += allocatedTotal
-            for b in beneficiaries {
+            for b in normalizedBeneficiaries {
                 balances[b, default: 0] -= perShare
             }
+            included = true
             includedCount += 1
+            debugRows.append(.init(
+                id: e.objectID.uriRepresentation().absoluteString,
+                date: e.date ?? .now, title: e.displayTitle,
+                rawPayer: rawPayer, normalizedPayer: normalizedPayer,
+                amount: e.amountDecimal, currencyCode: from,
+                convertedAmount: converted,
+                rawBeneficiaries: rawBeneficiaries, normalizedBeneficiaries: normalizedBeneficiaries,
+                perShare: perShareOpt, included: included, skipReason: nil))
         }
 
         let memberBalances: [MemberBalance] = memberOrder.map { id in
@@ -142,12 +254,30 @@ enum SettlementCalculator {
         let nonZero = memberBalances.filter { !$0.isSettled }
         let transfers = computeMinimumTransfers(balances: nonZero, currencyCode: target)
 
+        let debug: SettlementDebugInfo?
+        #if DEBUG
+        debug = SettlementDebugInfo(
+            memberSet: memberOrder,
+            selfCanonical: selfCanonical,
+            selfIDs: Array(selfIDs).sorted(),
+            expenseRows: debugRows
+        )
+        #else
+        debug = BuildInfo.isInternalBuild ? SettlementDebugInfo(
+            memberSet: memberOrder,
+            selfCanonical: selfCanonical,
+            selfIDs: Array(selfIDs).sorted(),
+            expenseRows: debugRows
+        ) : nil
+        #endif
+
         return SettlementResult(
             currencyCode: target,
             balances: memberBalances,
             transfers: transfers,
             missingRateCurrencies: missing,
-            includedExpenseCount: includedCount
+            includedExpenseCount: includedCount,
+            debugInfo: debug
         )
     }
 

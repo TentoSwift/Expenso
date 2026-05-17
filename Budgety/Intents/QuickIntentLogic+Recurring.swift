@@ -83,7 +83,7 @@ extension QuickIntentLogic {
         }
 
         // Premium 制限
-        if !PurchaseManager.shared.isPremium && sheet.isOwnedByCurrentUser {
+        if !PurchaseManager.isPremiumCached && sheet.isOwnedByCurrentUser {
             return [
                 "ok": false,
                 "error": "Premium 限定機能です。自分がオーナーのシート「\(sheet.displayName)」への MCP 経由の定期項目追加には Budgety Premium が必要です。他の Premium ユーザーが共有してくれているシートには無料で追加できます。",
