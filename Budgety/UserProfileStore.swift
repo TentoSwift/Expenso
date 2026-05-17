@@ -370,12 +370,47 @@ final class UserProfileStore: ObservableObject {
                         toID: urn, toName: "", toMemberID: nil
                     )
                     totalChanged += rewriteBeneficiaryCSV(in: ctx, sheet: s, fromID: emailKey, toID: urn)
+                    totalChanged += mergeDuplicatePP(in: ctx, sheet: s, fromID: emailKey, toID: urn)
                 }
             }
         }
         if totalChanged > 0 {
             try? ctx.save()
         }
+    }
+
+    /// 旧 canonical (email:xxx) で作られた PP と URN で作られた PP が両方存在する場合、
+    /// 旧 PP を削除して URN PP に統一する。両方がデータを持っていれば URN PP の値を尊重。
+    /// 旧 PP しか存在しない場合は recordName を URN に書き換えてリネーム。
+    /// 戻り値: 変更件数 (削除/リネームのいずれも 1 とカウント)。
+    private func mergeDuplicatePP(
+        in ctx: NSManagedObjectContext,
+        sheet: ExpenseSheet,
+        fromID: String,
+        toID: String
+    ) -> Int {
+        guard let pps = sheet.participantProfiles as? Set<ParticipantProfile> else { return 0 }
+        let oldPP = pps.first(where: { $0.recordName == fromID })
+        guard let oldPP else { return 0 }
+        let newPP = pps.first(where: { $0.recordName == toID })
+        if let newPP {
+            // 両方存在 → 旧 PP の値を新 PP にマージ (新 PP が空のフィールドのみ補完) して旧を削除
+            if (newPP.displayName ?? "").isEmpty, let dn = oldPP.displayName, !dn.isEmpty {
+                newPP.displayName = dn
+            }
+            if (newPP.colorHex ?? "").isEmpty, let ch = oldPP.colorHex, !ch.isEmpty {
+                newPP.colorHex = ch
+            }
+            if newPP.photoData == nil, let pd = oldPP.photoData {
+                newPP.photoData = pd
+            }
+            ctx.delete(oldPP)
+        } else {
+            // 旧 PP しかない → URN にリネーム
+            oldPP.recordName = toID
+            oldPP.updatedAt = .now
+        }
+        return 1
     }
 
     /// Expense.beneficiaryProfileIDs (CSV) の中に `fromID` があれば `toID` に置換。
