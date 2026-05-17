@@ -1,0 +1,252 @@
+//
+//  BudgetyMacContentView.swift
+//  Budgety For macOS
+//
+//  iOS 版 SheetListView 相当。NavigationSplitView の sidebar にシート一覧、
+//  detail に選択中のシートの支出ビュー。
+//
+
+import SwiftUI
+import CoreData
+
+struct BudgetyMacContentView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+
+    @FetchRequest(
+        sortDescriptors: [
+            NSSortDescriptor(keyPath: \ExpenseSheet.createdAt, ascending: false)
+        ],
+        animation: .default
+    ) private var sheets: FetchedResults<ExpenseSheet>
+
+    @State private var selectedSheet: ExpenseSheet?
+    @State private var showingAddSheet: Bool = false
+
+    var body: some View {
+        NavigationSplitView {
+            sidebar
+        } detail: {
+            if let sheet = selectedSheet {
+                BudgetyMacSheetView(sheet: sheet)
+            } else {
+                ContentUnavailableView {
+                    Label("シートを選択", systemImage: "rectangle.stack")
+                } description: {
+                    Text("左のリストからシートを選んでください。")
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddSheet) {
+            MacAddSheetView()
+        }
+        .onAppear {
+            if selectedSheet == nil { selectedSheet = sheets.first }
+        }
+    }
+
+    private var sidebar: some View {
+        List(selection: $selectedSheet) {
+            if sheets.isEmpty {
+                Section {
+                    Label("シートがありません", systemImage: "tray")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(sheets) { sheet in
+                    NavigationLink(value: sheet) {
+                        sheetRow(sheet)
+                    }
+                    .tag(sheet)
+                }
+            }
+        }
+        .navigationTitle("Budgety")
+        .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("シートを追加")
+            }
+        }
+    }
+
+    private func sheetRow(_ sheet: ExpenseSheet) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(sheet.tint.gradient)
+                    .frame(width: 36, height: 36)
+                Image(systemName: sheet.symbol ?? "person.2.fill")
+                    .foregroundStyle(.white)
+                    .font(.callout.weight(.semibold))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sheet.displayName).font(.body.weight(.medium))
+                Text(monthlyLabel(for: sheet))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if sheet.isOwnedByCurrentUser == false {
+                Image(systemName: "person.2.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func monthlyLabel(for sheet: ExpenseSheet) -> String {
+        let cal = Calendar.current
+        let now = Date()
+        let comps = cal.dateComponents([.year, .month], from: now)
+        let monthlyTotal = ((sheet.expenses as? Set<Expense>) ?? [])
+            .filter { e in
+                guard let d = e.date, e.kind == .expense else { return false }
+                let c = cal.dateComponents([.year, .month], from: d)
+                return c.year == comps.year && c.month == comps.month
+            }
+            .reduce(Decimal(0)) { $0 + $1.amountDecimal }
+        return "今月 \(CurrencyCatalog.format(monthlyTotal, code: sheet.resolvedDefaultCurrencyCode))"
+    }
+}
+
+// MARK: - Add Sheet
+
+struct MacAddSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.managedObjectContext) private var viewContext
+
+    @State private var name: String = ""
+    @State private var colorHex: String = "#5B8DEF"
+    @State private var symbol: String = "person.2.fill"
+    @State private var currencyCode: String = CurrencyCatalog.defaultCode
+
+    private let palette: [String] = [
+        "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
+        "#AF52DE", "#FF2D55", "#5AC8FA", "#FFCC00"
+    ]
+    private let symbols: [String] = [
+        "person.2.fill", "house.fill", "airplane",
+        "cart.fill", "fork.knife", "gift.fill",
+        "briefcase.fill", "book.fill"
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section("シート名") {
+                    TextField("家計、旅行 など", text: $name)
+                }
+                Section("カラー") {
+                    HStack(spacing: 12) {
+                        ForEach(palette, id: \.self) { hex in
+                            Circle()
+                                .fill(Color(hex: hex) ?? .blue)
+                                .frame(width: 28, height: 28)
+                                .overlay {
+                                    if hex == colorHex {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.white)
+                                    }
+                                }
+                                .onTapGesture { colorHex = hex }
+                        }
+                    }
+                }
+                Section("アイコン") {
+                    let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 8)
+                    LazyVGrid(columns: cols, spacing: 8) {
+                        ForEach(symbols, id: \.self) { s in
+                            Button {
+                                symbol = s
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(symbol == s
+                                              ? AnyShapeStyle(Color.accentColor.opacity(0.25))
+                                              : AnyShapeStyle(.quaternary))
+                                        .frame(width: 36, height: 36)
+                                    Image(systemName: s).font(.callout)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                Section("既定通貨") {
+                    Picker("通貨", selection: $currencyCode) {
+                        ForEach(CurrencyCatalog.all) { opt in
+                            Text("\(opt.symbol)  \(opt.code) — \(opt.displayName)").tag(opt.code)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Button("キャンセル") { dismiss() }
+                Spacer()
+                Button("作成") { save() }
+                    .keyboardShortcut(.return)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding()
+        }
+        .frame(width: 480, height: 560)
+    }
+
+    private func save() {
+        let sheet = ExpenseSheet(context: viewContext)
+        sheet.name = name.trimmingCharacters(in: .whitespaces)
+        sheet.colorHex = colorHex
+        sheet.symbol = symbol
+        sheet.defaultCurrencyCode = currencyCode
+        sheet.createdAt = .now
+        PersistenceController.seedDefaultCategories(for: sheet, in: viewContext)
+        PersistenceController.shared.save()
+        Task { @MainActor in
+            await UserProfileStore.shared.ensureUserRecordNameLoaded()
+            UserProfileStore.shared.ensureSelfMemberExists(in: viewContext)
+            UserProfileStore.shared.ensureProfile(in: sheet, ctx: viewContext)
+        }
+        dismiss()
+    }
+}
+
+// MARK: - Settings
+
+struct BudgetyMacSettingsView: View {
+    @StateObject private var profile = UserProfileStore.shared
+
+    var body: some View {
+        Form {
+            Section("プロフィール") {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color(hex: profile.avatarBgColorHex ?? "#5B8DEF") ?? .blue)
+                        .frame(width: 40, height: 40)
+                        .overlay {
+                            Text(String(profile.resolvedDisplayName.first ?? "?").uppercased())
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                        }
+                    VStack(alignment: .leading) {
+                        Text(profile.resolvedDisplayName)
+                        Text("Apple ID の名前を使用")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section("バージョン") {
+                LabeledContent("Budgety", value: "1.0")
+            }
+        }
+        .formStyle(.grouped)
+    }
+}

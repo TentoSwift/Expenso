@@ -40,6 +40,7 @@
 		2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgety For watchOS Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2DDCE11E2FA8974700A42F60 /* Budgety.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Budgety.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D18B4C22FB31605006F2C2A /* Budgety For visionOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgety For visionOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D18B4C22FB31605006F2C30 /* Budgety For macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgety For macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -108,6 +109,40 @@
 			);
 			target = 3D18B4C12FB31605006F2C2A /* Budgety For visionOS */;
 		};
+		4D18B4D92FB31696006F2C30 /* Exceptions for "Budgety" folder in "Budgety For macOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Expenso.xcdatamodeld,
+				FXRatesService.swift,
+				Models/CategorySeeds.swift,
+				"Models/Expense+Extensions.swift",
+				"Models/ExpenseCategory+Extensions.swift",
+				"Models/ExpenseSheet+Extensions.swift",
+				"Models/Member+Extensions.swift",
+				"Models/ParticipantProfile+Extensions.swift",
+				"Models/RecurringRule+Extensions.swift",
+				Models/TransactionKind.swift,
+				PersistenceController.swift,
+				ShareCoordinator.swift,
+				Support/BuildInfo.swift,
+				"Support/Color+Hex.swift",
+				Support/Currency.swift,
+				Support/Notifications.swift,
+				Support/PublicProfileSync.swift,
+				Support/SettlementCalculator.swift,
+				Support/ShareParticipantCanonical.swift,
+				Support/ShareParticipantDiagnostics.swift,
+				UserProfileStore.swift,
+			);
+			target = 4D18B4C12FB31605006F2C30 /* Budgety For macOS */;
+		};
+		4D18B4DA2FB31696006F2C30 /* Exceptions for "Budgety For macOS" folder in "Budgety For macOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4D18B4C12FB31605006F2C30 /* Budgety For macOS */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -122,6 +157,7 @@
 				2DDCE1702FA89B5900A42F60 /* Exceptions for "Budgety" folder in "Budgety" target */,
 				2D18B4D92FB31696006F2C29 /* Exceptions for "Budgety" folder in "Budgety For watchOS Watch App" target */,
 				3D18B4D92FB31696006F2C2A /* Exceptions for "Budgety" folder in "Budgety For visionOS" target */,
+				4D18B4D92FB31696006F2C30 /* Exceptions for "Budgety" folder in "Budgety For macOS" target */,
 			);
 			path = Budgety;
 			sourceTree = "<group>";
@@ -132,6 +168,14 @@
 				3D18B4DA2FB31696006F2C2A /* Exceptions for "Budgety For visionOS" folder in "Budgety For visionOS" target */,
 			);
 			path = "Budgety For visionOS";
+			sourceTree = "<group>";
+		};
+		4D18B4C32FB31605006F2C30 /* Budgety For macOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4D18B4DA2FB31696006F2C30 /* Exceptions for "Budgety For macOS" folder in "Budgety For macOS" target */,
+			);
+			path = "Budgety For macOS";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -160,6 +204,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4D18B4BF2FB31605006F2C30 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -169,6 +220,7 @@
 				2DDCE1202FA8974700A42F60 /* Budgety */,
 				2D18B4C32FB31605006F2C29 /* Budgety For watchOS Watch App */,
 				3D18B4C32FB31605006F2C2A /* Budgety For visionOS */,
+				4D18B4C32FB31605006F2C30 /* Budgety For macOS */,
 				2DDCE11F2FA8974700A42F60 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -179,6 +231,7 @@
 				2DDCE11E2FA8974700A42F60 /* Budgety.app */,
 				2D18B4C22FB31605006F2C29 /* Budgety For watchOS Watch App.app */,
 				3D18B4C22FB31605006F2C2A /* Budgety For visionOS.app */,
+				4D18B4C22FB31605006F2C30 /* Budgety For macOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -256,6 +309,28 @@
 			productReference = 3D18B4C22FB31605006F2C2A /* Budgety For visionOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		4D18B4C12FB31605006F2C30 /* Budgety For macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D18B4CD2FB31606006F2C30 /* Build configuration list for PBXNativeTarget "Budgety For macOS" */;
+			buildPhases = (
+				4D18B4BE2FB31605006F2C30 /* Sources */,
+				4D18B4BF2FB31605006F2C30 /* Frameworks */,
+				4D18B4C02FB31605006F2C30 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4D18B4C32FB31605006F2C30 /* Budgety For macOS */,
+			);
+			name = "Budgety For macOS";
+			packageProductDependencies = (
+			);
+			productName = "Budgety For macOS";
+			productReference = 4D18B4C22FB31605006F2C30 /* Budgety For macOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -273,6 +348,9 @@
 						CreatedOnToolsVersion = 26.2;
 					};
 					3D18B4C12FB31605006F2C2A = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					4D18B4C12FB31605006F2C30 = {
 						CreatedOnToolsVersion = 26.3;
 					};
 				};
@@ -298,6 +376,7 @@
 				2DDCE11D2FA8974700A42F60 /* Budgety */,
 				2D18B4C12FB31605006F2C29 /* Budgety For watchOS Watch App */,
 				3D18B4C12FB31605006F2C2A /* Budgety For visionOS */,
+				4D18B4C12FB31605006F2C30 /* Budgety For macOS */,
 			);
 		};
 /* End PBXProject section */
@@ -324,6 +403,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4D18B4C02FB31605006F2C30 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -342,6 +428,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		3D18B4BE2FB31605006F2C2A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D18B4BE2FB31605006F2C30 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -728,6 +821,84 @@
 			};
 			name = Release;
 		};
+		4D18B4CE2FB31606006F2C30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "Budgety For macOS/Budgety For macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2026051502;
+				DEVELOPMENT_ASSET_PATHS = "\"Budgety For macOS/Preview Content\"";
+				DEVELOPMENT_TEAM = LV3H7Q68W6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Budgety For macOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Budgety;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tento.budgety;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		4D18B4CF2FB31606006F2C30 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "Budgety For macOS/Budgety For macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2026051502;
+				DEVELOPMENT_ASSET_PATHS = "\"Budgety For macOS/Preview Content\"";
+				DEVELOPMENT_TEAM = LV3H7Q68W6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Budgety For macOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Budgety;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tento.budgety;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -763,6 +934,15 @@
 			buildConfigurations = (
 				3D18B4CE2FB31606006F2C2A /* Debug */,
 				3D18B4CF2FB31606006F2C2A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4D18B4CD2FB31606006F2C30 /* Build configuration list for PBXNativeTarget "Budgety For macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D18B4CE2FB31606006F2C30 /* Debug */,
+				4D18B4CF2FB31606006F2C30 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
