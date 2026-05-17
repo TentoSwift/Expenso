@@ -7,7 +7,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct AvatarView: View {
     let photoData: Data?

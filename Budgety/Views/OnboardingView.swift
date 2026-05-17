@@ -176,7 +176,7 @@ struct OnboardingView: View {
         .padding(.bottom, 16)
         .background(
             LinearGradient(
-                colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+                colors: [Color.platformSystemBackground.opacity(0), Color.platformSystemBackground],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -189,7 +189,7 @@ struct OnboardingView: View {
     // MARK: - Background
 
     private var backgroundLayer: some View {
-        Color(.systemBackground)
+        Color.platformSystemBackground
             .overlay(alignment: .top) {
                 LinearGradient(
                     colors: [Color.accentColor.opacity(0.10), Color.clear],

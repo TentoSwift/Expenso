@@ -1364,7 +1364,7 @@ struct AddExpenseView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(
-                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemBackground))
+                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.18) : Color.platformTertiarySystemBackground)
                 )
                 .foregroundStyle(isSelected ? Color.accentColor : .primary)
         }

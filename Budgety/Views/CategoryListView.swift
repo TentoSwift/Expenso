@@ -45,9 +45,11 @@ struct CategoryListView: View {
         .navigationTitle("\(record.displayName) のカテゴリ")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            #if !os(macOS)
             ToolbarItem(placement: .topBarTrailing) {
                 EditButton()
             }
+            #endif
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     if PurchaseManager.canAddCategory(to: record) {

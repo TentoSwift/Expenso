@@ -225,7 +225,12 @@ struct SettlementView: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button {
+                #if canImport(UIKit)
                 UIPasteboard.general.string = bal.profileID
+                #elseif canImport(AppKit)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(bal.profileID, forType: .string)
+                #endif
             } label: {
                 Label("ID をコピー", systemImage: "doc.on.doc")
             }

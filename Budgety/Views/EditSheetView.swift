@@ -211,7 +211,7 @@ struct EditSheetView: View {
                         .frame(width: 46, height: 46)
                 }
                 Circle()
-                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color.platformTertiarySystemBackground))
                     .frame(width: 38, height: 38)
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)
@@ -237,7 +237,11 @@ struct EditSheetView: View {
                 Text(opt.symbol + "  " + opt.code + " — " + opt.displayName).tag(opt.code)
             }
         }
+        #if os(macOS)
+        .pickerStyle(.menu)
+        #else
         .pickerStyle(.navigationLink)
+        #endif
     }
 
     private var deleteButtonTitle: String {

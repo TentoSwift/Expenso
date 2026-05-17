@@ -17,6 +17,11 @@ struct BudgetyMacSheetView: View {
 
     @State private var showingAdd: Bool = false
     @State private var editingExpense: Expense?
+    @State private var showingSettlement = false
+    @State private var showingCategories = false
+    @State private var showingRecurring = false
+    @State private var showingTemplates = false
+    @State private var showingEditSheet = false
 
     private var allExpenses: [Expense] {
         ((sheet.expenses as? Set<Expense>) ?? [])
@@ -57,7 +62,7 @@ struct BudgetyMacSheetView: View {
         }
         .navigationTitle(sheet.displayName)
         .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showingAdd = true
                 } label: {
@@ -65,12 +70,55 @@ struct BudgetyMacSheetView: View {
                 }
                 .help("支出を追加")
             }
+            ToolbarItem {
+                Menu {
+                    Button { showingSettlement = true } label: {
+                        Label("精算", systemImage: "yensign.circle")
+                    }
+                    Button { showingCategories = true } label: {
+                        Label("カテゴリ管理", systemImage: "square.grid.2x2")
+                    }
+                    Button { showingRecurring = true } label: {
+                        Label("定期項目", systemImage: "repeat")
+                    }
+                    Button { showingTemplates = true } label: {
+                        Label("テンプレート", systemImage: "doc.on.doc")
+                    }
+                    Divider()
+                    Button { showingEditSheet = true } label: {
+                        Label("シートを編集", systemImage: "pencil")
+                    }
+                } label: {
+                    Label("その他", systemImage: "ellipsis.circle")
+                }
+                .help("その他")
+            }
         }
         .sheet(isPresented: $showingAdd) {
             MacAddExpenseView(sheet: sheet, expense: nil)
         }
         .sheet(item: $editingExpense) { e in
             MacAddExpenseView(sheet: sheet, expense: e)
+        }
+        .sheet(isPresented: $showingSettlement) {
+            NavigationStack { SettlementView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
+        }
+        .sheet(isPresented: $showingCategories) {
+            NavigationStack { CategoryListView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
+        }
+        .sheet(isPresented: $showingRecurring) {
+            NavigationStack { RecurringListView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
+        }
+        .sheet(isPresented: $showingTemplates) {
+            NavigationStack { TemplateListView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
+        }
+        .sheet(isPresented: $showingEditSheet) {
+            NavigationStack { EditSheetView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
         }
     }
 

@@ -231,7 +231,7 @@ struct StatsView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(
-                    Capsule().fill(isSelected ? color.opacity(0.18) : Color(.secondarySystemBackground))
+                    Capsule().fill(isSelected ? color.opacity(0.18) : Color.platformSecondarySystemBackground)
                 )
                 .overlay(
                     Capsule().stroke(isSelected ? color : .clear, lineWidth: 1)
@@ -283,7 +283,7 @@ struct StatsView: View {
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(.secondarySystemGroupedBackground))
+                            .fill(Color.platformSecondarySystemGroupedBackground)
                     )
                 } else if let err = insightsError {
                     Text(err)
@@ -293,7 +293,7 @@ struct StatsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             RoundedRectangle(cornerRadius: 14)
-                                .fill(Color(.secondarySystemGroupedBackground))
+                                .fill(Color.platformSecondarySystemGroupedBackground)
                         )
                 }
             }
@@ -326,7 +326,7 @@ struct StatsView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(Color.platformSecondarySystemGroupedBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)

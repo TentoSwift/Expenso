@@ -159,7 +159,7 @@ struct AddSheetView: View {
                         .frame(width: 46, height: 46)
                 }
                 Circle()
-                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color.platformTertiarySystemBackground))
                     .frame(width: 38, height: 38)
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)

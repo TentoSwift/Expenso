@@ -57,7 +57,7 @@ struct SheetIconView: View {
                 .font(.system(size: badgeSize * 0.55, weight: .bold))
         }
         .frame(width: badgeSize, height: badgeSize)
-        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+        .overlay(Circle().stroke(Color.platformSystemBackground, lineWidth: 2))
     }
 
     @MainActor

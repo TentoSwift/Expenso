@@ -122,21 +122,54 @@
 				"Models/Expense+Extensions.swift",
 				"Models/ExpenseCategory+Extensions.swift",
 				"Models/ExpenseSheet+Extensions.swift",
+				"Models/ExpenseTemplate+Extensions.swift",
 				"Models/Member+Extensions.swift",
 				"Models/ParticipantProfile+Extensions.swift",
 				"Models/RecurringRule+Extensions.swift",
+				Models/SheetSymbols.swift,
 				Models/TransactionKind.swift,
 				PersistenceController.swift,
+				PurchaseManager.swift,
 				ShareCoordinator.swift,
 				Support/BuildInfo.swift,
+				"Support/Calendar+Month.swift",
 				"Support/Color+Hex.swift",
 				Support/Currency.swift,
+				Support/Haptics.swift,
+				Support/MarkdownHelper.swift,
+				Support/NetworkMonitor.swift,
 				Support/Notifications.swift,
 				Support/PublicProfileSync.swift,
+				Support/RecurringExpenseGenerator.swift,
 				Support/SettlementCalculator.swift,
 				Support/ShareParticipantCanonical.swift,
 				Support/ShareParticipantDiagnostics.swift,
+				Support/SheetLockManager.swift,
+				Support/StatsInsightsGenerator.swift,
+				"Support/View+PlatformShims.swift",
 				UserProfileStore.swift,
+				Views/AvatarView.swift,
+				Views/BeneficiaryPickerView.swift,
+				Views/CategoryIconView.swift,
+				Views/CategoryListView.swift,
+				Views/CategoryPickerView.swift,
+				Views/EditCategoryView.swift,
+				Views/EditRecurringRuleView.swift,
+				Views/PaywallView.swift,
+				Views/EditSheetView.swift,
+				Views/EditTemplateView.swift,
+				Views/iCloudStatusBanner.swift,
+				Views/MemberPickerView.swift,
+				Views/RecurringListView.swift,
+				Views/RecurringSettingsView.swift,
+				Views/SetSheetPasswordView.swift,
+				Views/SettlementView.swift,
+				Views/ShareStatusBadge.swift,
+				Views/SheetIconView.swift,
+				Views/SheetLockView.swift,
+				Views/StatsView.swift,
+				Views/TemplateListView.swift,
+				Views/TemplatePickerView.swift,
 			);
 			target = 4D18B4C12FB31605006F2C30 /* Budgety For macOS */;
 		};
@@ -853,7 +886,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tento.budgety;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -892,7 +925,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tento.budgety;
 				PRODUCT_NAME = "$(TARGET_NAME)";

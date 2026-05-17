@@ -495,7 +495,7 @@ struct SheetDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(selectedCategory == nil ? record.tint.opacity(0.18) : Color(.tertiarySystemBackground))
+                            Capsule().fill(selectedCategory == nil ? record.tint.opacity(0.18) : Color.platformTertiarySystemBackground)
                         )
                         .foregroundStyle(selectedCategory == nil ? record.tint : .primary)
                 }
@@ -513,7 +513,7 @@ struct SheetDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(selectedCategory?.objectID == cat.objectID ? cat.tint.opacity(0.22) : Color(.tertiarySystemBackground))
+                            Capsule().fill(selectedCategory?.objectID == cat.objectID ? cat.tint.opacity(0.22) : Color.platformTertiarySystemBackground)
                         )
                         .foregroundStyle(selectedCategory?.objectID == cat.objectID ? cat.tint : .primary)
                     }
@@ -1102,7 +1102,7 @@ private struct SummaryCard: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color(.tertiarySystemBackground))
+                        .fill(Color.platformTertiarySystemBackground)
                     Capsule()
                         .fill(color.gradient)
                         .frame(width: geo.size.width * clamped)
@@ -1224,7 +1224,7 @@ private struct ExpenseRowView: View {
                     size: 18
                 )
                 .overlay(
-                    Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                    Circle().stroke(Color.platformSystemBackground, lineWidth: 2)
                 )
                 .offset(x: 4, y: 4)
             }

@@ -392,7 +392,7 @@ struct MemberPickerView: View {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
-                                .fill(Color(.tertiarySystemBackground))
+                                .fill(Color.platformTertiarySystemBackground)
                                 .frame(width: 36, height: 36)
                             Image(systemName: "questionmark")
                                 .foregroundStyle(.secondary)
