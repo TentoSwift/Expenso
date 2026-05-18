@@ -101,24 +101,19 @@ struct BudgetyMacSheetView: View {
             MacAddExpenseView(sheet: sheet, expense: e)
         }
         .sheet(isPresented: $showingSettlement) {
-            NavigationStack { SettlementView(record: sheet) }
-                .frame(minWidth: 600, minHeight: 600)
+            MacModalSheet { SettlementView(record: sheet) }
         }
         .sheet(isPresented: $showingCategories) {
-            NavigationStack { CategoryListView(record: sheet) }
-                .frame(minWidth: 600, minHeight: 600)
+            MacModalSheet { CategoryListView(record: sheet) }
         }
         .sheet(isPresented: $showingRecurring) {
-            NavigationStack { RecurringListView(record: sheet) }
-                .frame(minWidth: 600, minHeight: 600)
+            MacModalSheet { RecurringListView(record: sheet) }
         }
         .sheet(isPresented: $showingTemplates) {
-            NavigationStack { TemplateListView(record: sheet) }
-                .frame(minWidth: 600, minHeight: 600)
+            MacModalSheet { TemplateListView(record: sheet) }
         }
         .sheet(isPresented: $showingEditSheet) {
-            NavigationStack { EditSheetView(record: sheet) }
-                .frame(minWidth: 600, minHeight: 600)
+            MacModalSheet { EditSheetView(record: sheet) }
         }
     }
 
@@ -271,5 +266,32 @@ struct BudgetyMacSheetView: View {
         }
         let sign = total >= 0 ? "+" : ""
         return sign + CurrencyCatalog.format(total, code: code)
+    }
+}
+
+// MARK: - Mac モーダル共通ラッパー
+
+/// Mac で sheet を出した時に、iOS の swipe-down に相当する閉じるボタンを
+/// 強制的に出すための wrapper。NavigationStack で包んで cancellation
+/// placement に xmark を置く。
+struct MacModalSheet<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        NavigationStack {
+            content()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .accessibilityLabel("閉じる")
+                        }
+                    }
+                }
+        }
+        .frame(minWidth: 600, minHeight: 600)
     }
 }
