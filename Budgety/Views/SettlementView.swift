@@ -185,7 +185,7 @@ struct SettlementView: View {
     @ViewBuilder
     private func balancesSection(result: SettlementResult) -> some View {
         Section("各メンバーの残高") {
-            ForEach(result.balances) { bal in
+            ForEach(result.balances, id: \.profileID) { bal in
                 balanceRow(bal: bal, currencyCode: result.currencyCode)
             }
         }
