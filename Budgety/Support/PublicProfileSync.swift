@@ -27,7 +27,7 @@ final class PublicProfileSync: ObservableObject {
     static let recordType = "UserProfile"
     private static let fieldDisplayName = "displayName"
     private static let fieldPhoto = "profilePhoto"
-    private static let fieldUpdatedAt = "updatedAt"
+    // updatedAt は CKRecord.modificationDate を使うので独自フィールド廃止
 
     private let containerID = "iCloud.com.tento.budgety"
     private var container: CKContainer { CKContainer(identifier: containerID) }
@@ -147,7 +147,8 @@ final class PublicProfileSync: ObservableObject {
                     if let asset = rec[Self.fieldPhoto] as? CKAsset, let url = asset.fileURL {
                         photoData = try? Data(contentsOf: url)
                     }
-                    let updatedAt = (rec[Self.fieldUpdatedAt] as? Date) ?? rec.modificationDate ?? now
+                    // タイムスタンプは CKRecord.modificationDate を使用 (CloudKit 自動管理)
+                    let updatedAt = rec.modificationDate ?? now
                     let cached = CachedProfile(
                         displayName: dn,
                         photoData: photoData,
@@ -200,7 +201,6 @@ final class PublicProfileSync: ObservableObject {
                 record = CKRecord(recordType: Self.recordType, recordID: recordID)
             }
             record[Self.fieldDisplayName] = displayName as CKRecordValue
-            record[Self.fieldUpdatedAt]   = Date() as CKRecordValue
 
             if let data = photoData, !data.isEmpty {
                 let tmpURL = FileManager.default.temporaryDirectory
