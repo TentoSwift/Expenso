@@ -27,7 +27,6 @@ final class PublicProfileSync: ObservableObject {
     static let recordType = "UserProfile"
     private static let fieldDisplayName = "displayName"
     private static let fieldPhoto = "profilePhoto"
-    private static let fieldColorHex = "colorHex"
     private static let fieldUpdatedAt = "updatedAt"
 
     private let containerID = "iCloud.com.tento.budgety"
@@ -52,6 +51,7 @@ final class PublicProfileSync: ObservableObject {
     struct CachedProfile: Codable, Equatable {
         let displayName: String
         let photoData: Data?
+        /// 廃止: Public DB には保存しない。decode 互換のため残置 (常に nil)。
         let colorHex: String?
         let updatedAt: Date
         let fetchedAt: Date
@@ -133,12 +133,11 @@ final class PublicProfileSync: ObservableObject {
                     if let asset = rec[Self.fieldPhoto] as? CKAsset, let url = asset.fileURL {
                         photoData = try? Data(contentsOf: url)
                     }
-                    let colorHex = rec[Self.fieldColorHex] as? String
                     let updatedAt = (rec[Self.fieldUpdatedAt] as? Date) ?? rec.modificationDate ?? now
                     let cached = CachedProfile(
                         displayName: dn,
                         photoData: photoData,
-                        colorHex: colorHex,
+                        colorHex: nil,
                         updatedAt: updatedAt,
                         fetchedAt: now
                     )
@@ -163,9 +162,9 @@ final class PublicProfileSync: ObservableObject {
 
     // MARK: - Upload own
 
-    /// 自分の URN + プロフィール (displayName / photoData / colorHex) を
-    /// Public DB にupsert する。
-    func uploadOwnProfile(urn: String, displayName: String, photoData: Data?, colorHex: String?) async {
+    /// 自分の URN + プロフィール (displayName / photoData) を Public DB にupsert する。
+    /// 色は保存しない (表示時に名前から決定的に生成する方針)。
+    func uploadOwnProfile(urn: String, displayName: String, photoData: Data?) async {
         let trimmedURN = urn.trimmingCharacters(in: .whitespaces)
         guard !trimmedURN.isEmpty else { return }
         let recordID = profileRecordID(forURN: trimmedURN)
@@ -181,11 +180,6 @@ final class PublicProfileSync: ObservableObject {
             }
             record[Self.fieldDisplayName] = displayName as CKRecordValue
             record[Self.fieldUpdatedAt]   = Date() as CKRecordValue
-            if let colorHex, !colorHex.isEmpty {
-                record[Self.fieldColorHex] = colorHex as CKRecordValue
-            } else {
-                record[Self.fieldColorHex] = nil
-            }
 
             if let data = photoData, !data.isEmpty {
                 let tmpURL = FileManager.default.temporaryDirectory
@@ -202,7 +196,7 @@ final class PublicProfileSync: ObservableObject {
             cache[trimmedURN] = CachedProfile(
                 displayName: displayName,
                 photoData: photoData,
-                colorHex: colorHex,
+                colorHex: nil,
                 updatedAt: now,
                 fetchedAt: now
             )
@@ -213,9 +207,9 @@ final class PublicProfileSync: ObservableObject {
         }
     }
 
-    /// 旧 API 互換 (colorHex 無し) — 既存コードの呼び出しを壊さないため残す。
-    func uploadOwnProfile(urn: String, displayName: String, photoData: Data?) async {
-        await uploadOwnProfile(urn: urn, displayName: displayName, photoData: photoData, colorHex: nil)
+    /// 旧 API 互換 (colorHex 引数を受けても無視) — 既存呼び出しのため残置。
+    func uploadOwnProfile(urn: String, displayName: String, photoData: Data?, colorHex: String?) async {
+        await uploadOwnProfile(urn: urn, displayName: displayName, photoData: photoData)
     }
 
     // MARK: - Convenience

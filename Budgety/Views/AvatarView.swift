@@ -40,7 +40,15 @@ struct AvatarView: View {
         return String(first).uppercased()
     }
 
-    private var tint: Color { Color(hex: colorHex) ?? .blue }
+    /// 背景色: 指定された colorHex が空/既定なら名前から決定的に生成。
+    /// "プロフィールは写真のみ" 方針 — ユーザーは色を選べず、名前から自動。
+    private var tint: Color {
+        let trimmed = colorHex.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed == "#8E8E93" {
+            return Color.deterministic(from: displayName)
+        }
+        return Color(hex: trimmed) ?? Color.deterministic(from: displayName)
+    }
 
     var body: some View {
         if let data = photoData, let image = makePlatformImage(from: data) {

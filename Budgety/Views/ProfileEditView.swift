@@ -28,7 +28,6 @@ struct ProfileEditView: View {
     @StateObject private var profile = UserProfileStore.shared
 
     @State private var draftName: String = ""
-    @State private var draftColor: String = "#5B8DEF"
     @State private var draftPhoto: Data? = nil
     @State private var didLoad: Bool = false
     @State private var isSaving: Bool = false
@@ -39,18 +38,11 @@ struct ProfileEditView: View {
     @State private var isLoadingPhoto: Bool = false
     #endif
 
-    private let palette: [String] = [
-        "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
-        "#AF52DE", "#FF2D55", "#5AC8FA", "#FFCC00",
-        "#FF6B6B", "#1DD1A1", "#7D3C98", "#636E72"
-    ]
-
     var body: some View {
         NavigationStack {
             Form {
                 avatarSection
                 nameSection
-                colorSection
                 if let saveError {
                     Section {
                         Label(saveError, systemImage: "exclamationmark.triangle")
@@ -125,8 +117,10 @@ struct ProfileEditView: View {
 
     @ViewBuilder
     private var avatarPreview: some View {
-        let initial = String(draftName.trimmingCharacters(in: .whitespaces).first ?? "?").uppercased()
-        let color = Color(hex: draftColor) ?? .blue
+        let trimmedName = draftName.trimmingCharacters(in: .whitespaces)
+        let initial = String(trimmedName.first ?? "?").uppercased()
+        // 写真未設定時は名前から決定的に背景色生成
+        let color = Color.deterministic(from: trimmedName.isEmpty ? "?" : trimmedName)
         if let photo = draftPhoto, let image = platformImage(from: photo) {
             image
                 .resizable()
@@ -161,39 +155,12 @@ struct ProfileEditView: View {
         }
     }
 
-    private var colorSection: some View {
-        Section("背景色") {
-            let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
-            LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(palette, id: \.self) { hex in
-                    Button {
-                        draftColor = hex
-                    } label: {
-                        Circle()
-                            .fill(Color(hex: hex) ?? .blue)
-                            .frame(width: 36, height: 36)
-                            .overlay {
-                                if hex == draftColor {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
     // MARK: - Load / Save
 
     private func loadIfNeeded() {
         guard !didLoad else { return }
         didLoad = true
         draftName = profile.displayName
-        draftColor = profile.avatarBgColorHex ?? "#5B8DEF"
         draftPhoto = profile.photoData
     }
 
@@ -250,17 +217,16 @@ struct ProfileEditView: View {
         defer { isSaving = false }
         saveError = nil
 
-        // ローカル更新
-        profile.updateProfile(displayName: name, photoData: draftPhoto, avatarBgColorHex: draftColor)
+        // ローカル更新 (色は保存しない、表示時に名前から自動生成)
+        profile.updateProfile(displayName: name, photoData: draftPhoto, avatarBgColorHex: nil)
         profile.applyDeviceLocalProfileEdit(in: viewContext)
 
-        // CloudKit Public DB upload
+        // CloudKit Public DB upload (色は送らない)
         if let urn = profile.userRecordName, !urn.isEmpty {
             await PublicProfileSync.shared.uploadOwnProfile(
                 urn: urn,
                 displayName: name,
-                photoData: draftPhoto,
-                colorHex: draftColor
+                photoData: draftPhoto
             )
         }
         Haptics.success()

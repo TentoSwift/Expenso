@@ -77,6 +77,24 @@ extension Color {
 }
 
 extension Color {
+    /// 文字列から決定的に色を生成。同じ文字列なら常に同じ色を返す。
+    /// プロフィール写真未設定時のアバター背景色 (= 名前から自動) に使う。
+    /// パレットは Material Design の比較的鮮やかな 14 色からハッシュで選ぶ。
+    static func deterministic(from string: String) -> Color {
+        let palette: [String] = [
+            "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
+            "#AF52DE", "#FF2D55", "#5AC8FA", "#FFCC00",
+            "#FF6B6B", "#1DD1A1", "#7D3C98", "#54A0FF",
+            "#E84393", "#27AE60"
+        ]
+        let key = string.trimmingCharacters(in: .whitespaces).isEmpty ? "?" : string
+        let hash = abs(key.unicodeScalars.reduce(into: 0) { acc, s in
+            acc = acc &* 31 &+ Int(s.value)
+        })
+        let hex = palette[hash % palette.count]
+        return Color(hex: hex) ?? .blue
+    }
+
     init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("#") { s.removeFirst() }
