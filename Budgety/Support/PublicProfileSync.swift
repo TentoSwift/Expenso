@@ -48,6 +48,13 @@ final class PublicProfileSync: ObservableObject {
     /// キャッシュ persistence のための UserDefaults キー (スキーマ変更時は v2 に bump)
     private static let udCacheKey = "publicProfile.cache.v2"
 
+    /// 現在 fetch 中の URN セット (重複起動防止)
+    private var inFlight: Set<String> = []
+    /// 失敗 URN の直近 backoff 時刻 (= 次回再試行可能になる時刻)
+    private var nextRetry: [String: Date] = [:]
+    /// fetch 失敗時の最低待機時間 (= スキーマ未 deploy 等で全失敗してもこれだけ待つ)
+    private static let failureBackoff: TimeInterval = 60 * 5  // 5 分
+
     struct CachedProfile: Codable, Equatable {
         let displayName: String
         let photoData: Data?
@@ -91,6 +98,7 @@ final class PublicProfileSync: ObservableObject {
     }
 
     /// キャッシュにあれば即返し、無いか TTL 切れなら背景 fetch をキック。
+    /// fetch 失敗時 backoff + in-flight 重複防止で過剰な Task 生成を防ぐ (= OOM 対策)。
     @discardableResult
     func profileOrPrefetch(for urn: String) -> CachedProfile? {
         guard !urn.isEmpty else { return nil }
@@ -99,8 +107,14 @@ final class PublicProfileSync: ObservableObject {
             guard let existing else { return true }
             return Date().timeIntervalSince(existing.fetchedAt) > Self.cacheTTL
         }()
-        if needsRefresh {
-            Task { await fetchProfiles(forURNs: [urn]) }
+        if needsRefresh, !inFlight.contains(urn) {
+            // backoff チェック (失敗直後は一定時間 fetch しない)
+            if let next = nextRetry[urn], next > Date() { return existing }
+            inFlight.insert(urn)
+            Task { [weak self] in
+                await self?.fetchProfiles(forURNs: [urn])
+                await MainActor.run { self?.inFlight.remove(urn) }
+            }
         }
         return existing
     }
@@ -146,6 +160,10 @@ final class PublicProfileSync: ObservableObject {
                         anyChange = true
                     }
                 case .failure(let error):
+                    // 失敗 URN を backoff キューに登録 (= スキーマ未 deploy 等の連続失敗で
+                    // 大量の Task が積まれないようにする)
+                    let urnKey = urn
+                    nextRetry[urnKey] = Date().addingTimeInterval(Self.failureBackoff)
                     if let ck = error as? CKError, ck.code == .unknownItem {
                         // 相手がまだ Public profile を書いていない (正常)
                     } else {
@@ -155,6 +173,9 @@ final class PublicProfileSync: ObservableObject {
             }
             if anyChange { saveCacheToDisk() }
         } catch {
+            // バッチ全体失敗 → 全 URN に backoff (= スキーマ未 deploy 等の連続失敗時)
+            let until = Date().addingTimeInterval(Self.failureBackoff)
+            for urn in cleaned { nextRetry[urn] = until }
             lastError = error.localizedDescription
             Self.log.error("fetchProfiles failed: \(error.localizedDescription, privacy: .public)")
         }
