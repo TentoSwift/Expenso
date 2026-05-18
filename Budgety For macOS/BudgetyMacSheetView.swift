@@ -247,14 +247,7 @@ struct BudgetyMacSheetView: View {
 
     private func expenseRow(_ e: Expense) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(e.categoryTint.opacity(0.2))
-                    .frame(width: 32, height: 32)
-                Image(systemName: e.categorySymbol)
-                    .foregroundStyle(e.categoryTint)
-                    .font(.callout)
-            }
+            CategoryIconView(expense: e, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.displayTitle).font(.body)
                 let payer = e.displayPaidBy
