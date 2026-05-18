@@ -73,12 +73,22 @@ struct EditCategoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    #if os(macOS)
+                    Button("キャンセル") { dismiss() }
+                    #else
                     circleToolbarButton(systemImage: "xmark") { dismiss() }
+                    #endif
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(!canSave)
+                        .keyboardShortcut(.return)
+                    #else
                     circleToolbarButton(systemImage: "checkmark") { save() }
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.4)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }

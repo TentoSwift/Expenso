@@ -191,7 +191,7 @@ struct MacAddSheetView: View {
             HStack {
                 Button("キャンセル") { dismiss() }
                 Spacer()
-                Button("作成") { save() }
+                Button("完了") { save() }
                     .keyboardShortcut(.return)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }

@@ -227,8 +227,13 @@ struct EditRecurringRuleView: View {
                     Button("キャンセル") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(!canSave)
+                    #else
                     Button("保存") { save() }
                         .disabled(!canSave)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }

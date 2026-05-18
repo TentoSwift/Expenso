@@ -166,7 +166,7 @@ struct MacAddExpenseView: View {
             HStack {
                 Button("キャンセル") { dismiss() }
                 Spacer()
-                Button("保存") { save() }
+                Button("完了") { save() }
                     .keyboardShortcut(.return)
                     .disabled(!canSave)
             }

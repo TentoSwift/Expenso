@@ -143,8 +143,13 @@ struct EditSheetView: View {
                     Button("キャンセル") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    #else
                     Button("保存") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }

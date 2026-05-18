@@ -113,7 +113,9 @@ struct BudgetyMacSheetView: View {
             MacModalSheet { TemplateListView(record: sheet) }
         }
         .sheet(isPresented: $showingEditSheet) {
-            MacModalSheet { EditSheetView(record: sheet) }
+            // EditSheetView 自身が cancel/save の toolbar を持つので wrapper 不要
+            NavigationStack { EditSheetView(record: sheet) }
+                .frame(minWidth: 600, minHeight: 600)
         }
     }
 
