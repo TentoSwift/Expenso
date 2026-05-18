@@ -49,7 +49,6 @@ struct BudgetyMacApp: App {
                         if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
                             await UserProfileStore.shared.ensureUserRecordNameLoaded()
                         }
-                        await UserProfileStore.shared.refreshAppleIDName()
                         UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
                     }
                 }

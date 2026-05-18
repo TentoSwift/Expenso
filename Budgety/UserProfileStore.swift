@@ -174,58 +174,50 @@ final class UserProfileStore: ObservableObject {
         }
     }
 
-    /// 自分の Apple ID 名 (`CKUserIdentity.nameComponents`) を取得して `displayName` に
-    /// 反映する。`CKContainer.userIdentity(forUserRecordID:)` を使うため、事前に
-    /// `userDiscoverability` パーミッションを要求する必要がある。
+    /// セッション内 1 回までガード (= ダイアログ多重表示防止)
+    private var didAttemptDiscoverability = false
+
+    /// 自分の Apple ID 名 (`CKUserIdentity.nameComponents`) を取得して必要なら
+    /// `selfEmail` をキャッシュする。
     ///
-    /// 動作:
-    /// - 初回起動時は許可ダイアログを表示。
-    /// - **許可** → Apple ID 名を取得して `displayName` を上書き。
-    /// - **拒否** → `displayName` を空にクリア (= `resolvedDisplayName` が "自分" に
-    ///   フォールバック)。プロフィール設定 UI を撤去したので、ここで強制的に統一する。
-    /// - 取得失敗 (ネットワーク等) は既存 `displayName` を維持。
+    /// 重要:
+    /// - displayName はカスタムプロフィール (ProfileEditView + Public DB) で管理する
+    ///   方針なので、ここでは上書きしない。
+    /// - userDiscoverability パーミッションは「未決定」の時だけ要求する。
+    ///   `requestApplicationPermission` を毎回呼ぶと環境によってはダイアログが
+    ///   何重にも開く事故が起きるため、必ず status を先に問い合わせる。
+    /// - セッション内では 1 回だけ試行する (重複ガード)。
     func refreshAppleIDName() async {
+        if didAttemptDiscoverability { return }
+        didAttemptDiscoverability = true
+
         await ensureUserRecordNameLoaded()
         guard let urn = userRecordName, !urn.isEmpty else { return }
 
         let container = CKContainer(identifier: Self.containerID)
 
-        // パーミッション確認 (初回はダイアログ)
+        // status を先に確認 → 未決定の時だけリクエスト
+        let currentStatus = (try? await container.applicationPermissionStatus(for: .userDiscoverability))
+            ?? .couldNotComplete
         let status: CKContainer.ApplicationPermissionStatus
-        do {
-            status = try await container.requestApplicationPermission(.userDiscoverability)
-        } catch {
-            return
+        if currentStatus == .initialState {
+            status = (try? await container.requestApplicationPermission(.userDiscoverability))
+                ?? .couldNotComplete
+        } else {
+            status = currentStatus
         }
-        guard status == .granted else {
-            // 拒否されたら表示は "自分" にフォールバック
-            if !displayName.isEmpty {
-                displayName = ""
-                profileUpdatedAt = .now
-            }
-            return
-        }
+        guard status == .granted else { return }
 
-        // 自分の identity を取得
+        // self email だけキャッシュ (旧 "email:..." canonical の migration 用)
         do {
             let recID = CKRecord.ID(recordName: urn)
             guard let identity = try await container.userIdentity(forUserRecordID: recID) else { return }
-            // メールも一緒にキャッシュ (旧 "email:..." canonical の自分ぶん migration 用)
             if let email = identity.lookupInfo?.emailAddress?.lowercased(),
                !email.isEmpty, selfEmail != email {
                 selfEmail = email
             }
-            guard let comps = identity.nameComponents else { return }
-            let formatter = PersonNameComponentsFormatter()
-            formatter.style = .default
-            let name = formatter.string(from: comps).trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { return }
-            if displayName != name {
-                displayName = name
-                profileUpdatedAt = .now
-            }
         } catch {
-            // 取得失敗時は無視 (既存 displayName を維持)
+            // 取得失敗時は無視
         }
     }
 

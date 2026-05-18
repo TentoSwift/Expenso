@@ -269,10 +269,7 @@ struct MacAddExpenseView: View {
     @MainActor
     private func loadShareAndDefaults() async {
         share = ShareCoordinator.shared.existingShare(for: sheet)
-        // 開いた時点で Apple ID 名 + CKShare nameComponents を強制 hydrate
-        // (PP が未作成のタイミングで picker が "メンバー" のままになるのを防ぐ)
         await UserProfileStore.shared.ensureUserRecordNameLoaded()
-        await UserProfileStore.shared.refreshAppleIDName()
         UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: viewContext)
         guard !didLoad else { return }
         didLoad = true
