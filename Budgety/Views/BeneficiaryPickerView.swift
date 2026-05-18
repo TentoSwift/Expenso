@@ -16,30 +16,42 @@ struct BeneficiaryPickerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var profile = UserProfileStore.shared
+    @StateObject private var pub = PublicProfileSync.shared
     @State private var share: CKShare?
 
+    /// 自分の canonical 自己 ID (オーナーなら userRecordName、参加者なら "email:...")
     private var selfProfileID: String? {
-        let rn = profile.userRecordName
-        return (rn?.isEmpty == false) ? rn : nil
+        let id = profile.canonicalSelfID(forShare: share) ?? profile.userRecordName
+        return (id?.isEmpty == false) ? id : nil
     }
 
-    /// 自分以外の参加者 (オーナー含む)。CKShare があれば優先、無ければ ParticipantProfile から組む。
+    /// 自分の取りうるすべての ID 集合 (canonical + 旧 userRecordName + cross-device 履歴)。
+    /// PP の recordName がこの集合に含まれるなら「自分」と判定して others から除外する。
+    private var selfIDSet: Set<String> {
+        profile.canonicalSelfIDs(forShare: share)
+    }
+
+    /// 自分以外の参加者 (オーナー含む)。URN ベースで dedup。
+    /// iCloud Extended Share Access エンタイトルメントで URN が全 viewer に
+    /// 一意に見えるので、PP.recordName (= URN) と一致させて Apple ID 名が出るようにする。
     private var otherProfileIDs: [String] {
         var result: [String] = []
         var seen = Set<String>()
+        // 「自分」とみなされる ID は全部 seen に入れて others から除外する
+        for id in selfIDSet { seen.insert(id) }
         if let myID = selfProfileID { seen.insert(myID) }
 
+        // 1) CKShare 参加者 (URN を使う)
         if let share {
             for p in share.participants {
-                guard let rn = p.userIdentity.userRecordID?.recordName,
-                      !rn.isEmpty,
-                      rn != "_defaultOwner_", rn != "__defaultOwner__",
+                let rn = p.userIdentity.userRecordID?.recordName ?? ""
+                guard !rn.isEmpty,
+                      !UserProfileStore.isSelfPlaceholderRecordName(rn),
                       seen.insert(rn).inserted else { continue }
                 result.append(rn)
             }
         }
-        // CKShare がまだロード中、もしくは参加者情報がローカルに無いケース用に
-        // ParticipantProfile からも補完する
+        // 2) PP からも補完 (CKShare がまだ取れていない場合のフォールバック)
         let profiles = (record.participantProfiles as? Set<ParticipantProfile>) ?? []
         for pp in profiles.sorted(by: { ($0.displayName ?? "") < ($1.displayName ?? "") }) {
             guard let rn = pp.recordName,

@@ -120,7 +120,7 @@ struct SheetCalendarView: View {
                 }
             }
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .background(Color.platformSystemGroupedBackground.ignoresSafeArea())
         .navigationTitle("カレンダー")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editingExpense) { exp in
@@ -314,7 +314,7 @@ struct SheetCalendarView: View {
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.secondarySystemGroupedBackground))
+                            .fill(Color.platformSecondarySystemGroupedBackground)
                     )
             } else {
                 VStack(spacing: 0) {
@@ -334,7 +334,7 @@ struct SheetCalendarView: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.secondarySystemGroupedBackground))
+                        .fill(Color.platformSecondarySystemGroupedBackground)
                 )
             }
         }

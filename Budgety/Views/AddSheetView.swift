@@ -18,17 +18,8 @@ struct AddSheetView: View {
     @State private var selectedSymbol: String = "person.2.fill"
     @State private var defaultCurrencyCode: String = CurrencyCatalog.defaultCode
     @State private var budgetText: String = ""
-    @State private var showingProfileEditor: Bool = false
-
-    /// AddSheetView を開いた時点でプロフィールが未設定だったかを記録。
-    /// 一度入力したら以降のシートでは出さない (= 「最初のシート作成時のみ」UX)。
-    @State private var needsProfileSetup: Bool
 
     @State private var showingPaywall: Bool = false
-
-    init() {
-        _needsProfileSetup = State(initialValue: UserProfileStore.shared.isEmpty)
-    }
 
     private let palette: [String] = [
         "#5B8DEF", "#34C759", "#FF9500", "#FF3B30",
@@ -36,9 +27,7 @@ struct AddSheetView: View {
     ]
 
     private var canSave: Bool {
-        let nameOk = !name.trimmingCharacters(in: .whitespaces).isEmpty
-        let profileOk = !needsProfileSetup || !profile.isEmpty
-        return nameOk && profileOk
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// JPY/KRW など最小単位のない通貨は decimalPad 不要
@@ -49,9 +38,6 @@ struct AddSheetView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if needsProfileSetup {
-                    profileSection
-                }
                 Section {
                     HStack {
                         Spacer()
@@ -120,53 +106,6 @@ struct AddSheetView: View {
                         .disabled(!canSave)
                 }
             }
-            .sheet(isPresented: $showingProfileEditor) {
-                UserProfileEditView()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var profileSection: some View {
-        Section {
-            if profile.isEmpty {
-                Button {
-                    showingProfileEditor = true
-                } label: {
-                    Label("プロフィールを設定", systemImage: "person.crop.circle.badge.plus")
-                        .foregroundStyle(Color.accentColor)
-                }
-            } else {
-                Button {
-                    showingProfileEditor = true
-                } label: {
-                    HStack(spacing: 12) {
-                        AvatarView(
-                            photoData: profile.photoData,
-                            displayName: profile.resolvedDisplayName,
-                            colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
-                            size: 44
-                        )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(profile.resolvedDisplayName)
-                                .foregroundStyle(.primary)
-                                .fontWeight(.medium)
-                            Text("タップして変更")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "pencil")
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        } header: {
-            Text("あなたのプロフィール")
-        } footer: {
-            Text("シートで「自分」として表示されます。後で設定からも変更できます。")
-                .font(.caption2)
         }
     }
 
@@ -176,7 +115,11 @@ struct AddSheetView: View {
                 Text(opt.symbol + "  " + opt.code + " — " + opt.displayName).tag(opt.code)
             }
         }
+        #if os(macOS)
+        .pickerStyle(.menu)
+        #else
         .pickerStyle(.navigationLink)
+        #endif
     }
 
     private var sheetIconGrid: some View {
@@ -220,7 +163,7 @@ struct AddSheetView: View {
                         .frame(width: 46, height: 46)
                 }
                 Circle()
-                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color.platformTertiarySystemBackground))
                     .frame(width: 38, height: 38)
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)

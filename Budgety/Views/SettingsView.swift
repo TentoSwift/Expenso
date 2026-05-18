@@ -11,10 +11,12 @@ struct SettingsView: View {
     @StateObject private var pm = PurchaseManager.shared
     @StateObject private var fx = FXRatesService.shared
     @StateObject private var persistence = PersistenceController.shared
+    @StateObject private var profile = UserProfileStore.shared
     @Environment(\.managedObjectContext) private var viewContext
     @State private var showPaywall: Bool = false
     @State private var showEraseConfirm: Bool = false
     @State private var iCloudAccountStatus: CKAccountStatus = .couldNotDetermine
+    @State private var showingProfileEdit: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,33 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section("プロフィール") {
+                    Button {
+                        showingProfileEdit = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            AvatarView(
+                                photoData: profile.photoData,
+                                displayName: profile.resolvedDisplayName,
+                                colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
+                                size: 40
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(profile.resolvedDisplayName)
+                                    .foregroundStyle(.primary)
+                                Text("名前・写真・背景色を編集")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Section("カテゴリ") {
@@ -212,6 +241,9 @@ struct SettingsView: View {
             .navigationTitle("設定")
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
+            }
+            .sheet(isPresented: $showingProfileEdit) {
+                ProfileEditView()
             }
             .task {
                 UserProfileStore.shared.ensureSelfMemberExists(in: viewContext)

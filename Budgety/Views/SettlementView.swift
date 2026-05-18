@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 /// 集計対象の期間プリセット。
 enum SettlementPeriod: String, CaseIterable, Identifiable {
@@ -29,6 +30,7 @@ enum SettlementPeriod: String, CaseIterable, Identifiable {
 struct SettlementView: View {
     @ObservedObject var record: ExpenseSheet
     @ObservedObject private var fx = FXRatesService.shared
+    @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var profile = UserProfileStore.shared
     @State private var result: SettlementResult?
 
@@ -51,6 +53,9 @@ struct SettlementView: View {
                         missingRatesSection(currencies: result.missingRateCurrencies)
                     }
                     notesSection
+                }
+                if BuildInfo.isInternalBuild {
+                    debugSelfSection()
                 }
             } else {
                 Section {
@@ -180,7 +185,7 @@ struct SettlementView: View {
     @ViewBuilder
     private func balancesSection(result: SettlementResult) -> some View {
         Section("各メンバーの残高") {
-            ForEach(result.balances) { bal in
+            ForEach(result.balances, id: \.profileID) { bal in
                 balanceRow(bal: bal, currencyCode: result.currencyCode)
             }
         }
@@ -189,7 +194,9 @@ struct SettlementView: View {
     @ViewBuilder
     private func balanceRow(bal: MemberBalance, currencyCode: String) -> some View {
         let info = record.memberDisplayInfo(for: bal.profileID)
-        let isMe = profile.userRecordName == bal.profileID
+        let share = ShareCoordinator.shared.existingShare(for: record)
+        let selfIDs = profile.canonicalSelfIDs(forShare: share)
+        let isMe = selfIDs.contains(bal.profileID)
         HStack(spacing: 12) {
             AvatarView(
                 photoData: info.photoData,
@@ -202,11 +209,136 @@ struct SettlementView: View {
                 if isMe {
                     Text("自分").font(.caption2).foregroundStyle(.secondary)
                 }
+                if BuildInfo.isInternalBuild {
+                    Text("ID: \(bal.profileID)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
             }
             Spacer()
             balanceLabel(amount: bal.amount, currencyCode: currencyCode)
                 .monospacedDigit()
         }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                #if canImport(UIKit)
+                UIPasteboard.general.string = bal.profileID
+                #elseif canImport(AppKit)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(bal.profileID, forType: .string)
+                #endif
+            } label: {
+                Label("ID をコピー", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    /// DEBUG セクション: 自分の canonical / userRecordName + 各 expense の集計過程
+    @ViewBuilder
+    private func debugSelfSection() -> some View {
+        let share = ShareCoordinator.shared.existingShare(for: record)
+        let canonical = profile.canonicalSelfID(forShare: share) ?? "(nil)"
+        let urn = profile.userRecordName ?? "(nil)"
+        let pps = (record.participantProfiles as? Set<ParticipantProfile>) ?? []
+        Section("DEBUG: self / sheet") {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("self canonical: \(canonical)")
+                Text("self userRecordName: \(urn)")
+                Text("--- sheet ParticipantProfiles (\(pps.count)) ---")
+                ForEach(pps.sorted(by: { ($0.displayName ?? "") < ($1.displayName ?? "") }), id: \.objectID) { pp in
+                    Text("  rn:\(pp.recordName ?? "(nil)")  name:\(pp.displayName ?? "(nil)")")
+                }
+            }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+        if let info = result?.debugInfo {
+            Section("DEBUG: memberSet (\(info.memberSet.count))") {
+                ForEach(info.memberSet, id: \.self) { id in
+                    Text(id)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+            }
+            Section("DEBUG: selfIDs (\(info.selfIDs.count))") {
+                ForEach(info.selfIDs, id: \.self) { id in
+                    Text(id)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+            }
+            Section("DEBUG: expense rows (\(info.expenseRows.count))") {
+                ForEach(Array(info.expenseRows.enumerated()), id: \.offset) { _, row in
+                    debugExpenseRow(row)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func debugExpenseRow(_ row: SettlementDebugInfo.ExpenseRow) -> some View {
+        let df: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "MM/dd"
+            return f
+        }()
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Image(systemName: row.included ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(row.included ? .green : .red)
+                Text("\(df.string(from: row.date)) \(row.title.isEmpty ? "(無題)" : row.title)")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("\(NSDecimalNumber(decimal: row.amount).stringValue) \(row.currencyCode)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            if let reason = row.skipReason {
+                Text("skip: \(reason)")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+            Text("payer: \(row.rawPayer)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            if !row.normalizedPayer.isEmpty, row.normalizedPayer != row.rawPayer {
+                Text("  → \(row.normalizedPayer)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.blue)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            if !row.rawBeneficiaries.isEmpty {
+                Text("beneficiaries: \(row.rawBeneficiaries.joined(separator: ", "))")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2).truncationMode(.middle)
+                if row.normalizedBeneficiaries != row.rawBeneficiaries {
+                    Text("  → \(row.normalizedBeneficiaries.joined(separator: ", "))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.blue)
+                        .lineLimit(2).truncationMode(.middle)
+                }
+            }
+            if let perShare = row.perShare, let converted = row.convertedAmount {
+                Text("converted: \(NSDecimalNumber(decimal: converted).stringValue) / perShare: \(NSDecimalNumber(decimal: perShare).stringValue)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+        .textSelection(.enabled)
     }
 
     @ViewBuilder

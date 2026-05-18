@@ -54,11 +54,11 @@ struct SheetDetailView: View {
 
     @State private var period: Period = .thisMonth
     @State private var showingAddExpense = false
+    @State private var showingCSVImport = false
     @State private var showingShare = false
     @State private var editingExpense: Expense?
     @State private var editingRule: RecurringRule?
     @State private var showingEditGroup = false
-    @State private var showingProfileEdit = false
     @State private var pendingDeleteExpense: Expense?
     @State private var searchText: String = ""
     @State private var selectedCategory: ExpenseCategory?
@@ -223,11 +223,6 @@ struct SheetDetailView: View {
                     } label: {
                         Label("シートを編集", systemImage: "pencil")
                     }
-                    Button {
-                        showingProfileEdit = true
-                    } label: {
-                        Label("このシートでのプロフィール", systemImage: "person.crop.circle")
-                    }
                     NavigationLink {
                         CategoryListView(record: record)
                     } label: {
@@ -272,6 +267,11 @@ struct SheetDetailView: View {
                     } label: {
                         Label("PDF レポート", systemImage: "doc.richtext")
                     }
+                    Button {
+                        showingCSVImport = true
+                    } label: {
+                        Label("CSV を取り込む", systemImage: "square.and.arrow.down")
+                    }
                     Divider()
                     // 削除/離脱はオーナー or 参加者で分岐
                     if record.isOwnedByCurrentUser {
@@ -294,6 +294,9 @@ struct SheetDetailView: View {
         }
         .sheet(isPresented: $showingAddExpense) {
             AddExpenseView(record: record)
+        }
+        .sheet(isPresented: $showingCSVImport) {
+            CSVImportView(sheet: record)
         }
         .sheet(isPresented: $exportPaywall) {
             PaywallView()
@@ -357,9 +360,6 @@ struct SheetDetailView: View {
         }
         .sheet(isPresented: $showingEditGroup) {
             EditSheetView(record: record)
-        }
-        .sheet(isPresented: $showingProfileEdit) {
-            UserProfileEditView(sheet: record)
         }
         .confirmationDialog(
             "この支出を削除しますか?",
@@ -495,7 +495,7 @@ struct SheetDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(selectedCategory == nil ? record.tint.opacity(0.18) : Color(.tertiarySystemBackground))
+                            Capsule().fill(selectedCategory == nil ? record.tint.opacity(0.18) : Color.platformTertiarySystemBackground)
                         )
                         .foregroundStyle(selectedCategory == nil ? record.tint : .primary)
                 }
@@ -513,7 +513,7 @@ struct SheetDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(selectedCategory?.objectID == cat.objectID ? cat.tint.opacity(0.22) : Color(.tertiarySystemBackground))
+                            Capsule().fill(selectedCategory?.objectID == cat.objectID ? cat.tint.opacity(0.22) : Color.platformTertiarySystemBackground)
                         )
                         .foregroundStyle(selectedCategory?.objectID == cat.objectID ? cat.tint : .primary)
                     }
@@ -605,7 +605,7 @@ struct SheetDetailView: View {
         copy.kindRaw = expense.kindRaw
         copy.currencyCode = expense.currencyCode
         copy.categoryRaw = expense.categoryRaw
-        copy.paidBy = expense.paidBy
+        copy.paidBy = nil
         copy.payerProfileID = expense.payerProfileID
         copy.date = .now
         copy.note = expense.note
@@ -713,32 +713,28 @@ private struct SummaryCard: View {
     var body: some View {
         let t = totals()
         let net = t.income - t.expense
-        let tint = record.tint
-        VStack(alignment: .leading, spacing: 14) {
-            summaryHeader
+        let budget = record.monthlyBudgetDecimal
+        let showBudgetMetrics = !isSearching && period == .thisMonth
+            && selectedCategory == nil && budget != nil
+        VStack(alignment: .leading, spacing: 18) {
+            // Header: 期間・シート名 + 共有バッジ + カテゴリ pill
+            topHeader
 
-            VStack(spacing: 4) {
-                Text(CurrencyCatalog.format(net, code: code))
-                    .font(.system(size: 38, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
-                    // ネット合計は固定 38pt なので AX でも 1 行に収まるように
-                    // 必要なら自動縮小して伸長は許す。
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    // 期間切替や Expense 編集で値が変わった時、桁ごとに
-                    // ロール表示するアニメーション。
-                    .contentTransition(.numericText(value: doubleValue(net)))
-                    .animation(.snappy, value: net)
-                expenseIncomeBreakdown(expense: t.expense, income: t.income)
+            // 大型の支出合計
+            mainExpense(t.expense)
+
+            Divider()
+
+            // メトリクス列 (収入 / 残予算 / 収支)
+            metricsRow(income: t.income, expense: t.expense, net: net, budget: budget,
+                       showRemaining: showBudgetMetrics)
+
+            // 月予算プログレスバー
+            if showBudgetMetrics, let budget {
+                cleanBudgetBar(spent: t.expense, budget: budget)
             }
 
-            // 月予算の進捗バー (今月 + カテゴリ未選択時のみ)
-            if !isSearching, period == .thisMonth, selectedCategory == nil,
-               let budget = record.monthlyBudgetDecimal {
-                budgetProgress(spent: t.expense, budget: budget)
-            }
-
+            // 為替警告
             if !t.missing.isEmpty {
                 Label("\(t.missing.sorted().joined(separator: ", ")) のレート未取得", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
@@ -749,12 +745,194 @@ private struct SummaryCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
+        .padding(20)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(tint.opacity(0.18))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.regularMaterial)
         )
+    }
+
+    // MARK: - New clean UI components
+
+    private var topHeader: some View {
+        HStack(spacing: 8) {
+            if isSearching {
+                searchPill
+            } else {
+                periodMenuLabel
+            }
+            if let cat = selectedCategory {
+                categoryPill(cat)
+            }
+            Spacer()
+            ShareStatusBadge(record: record)
+        }
+    }
+
+    /// "2026年11月 · Tento" 形式のメニュー (= 期間切替トリガ)。
+    /// シート名はサブテキストとして同じ行に出す。
+    private var periodMenuLabel: some View {
+        Menu {
+            ForEach(SheetDetailView.Period.allCases) { p in
+                Button {
+                    period = p
+                } label: {
+                    HStack {
+                        Text(p.label)
+                        if p == period { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(periodHeaderLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(record.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// 期間のヘッダー表示 ("2026年11月" / "先月" / "全期間" / "カスタム")
+    private var periodHeaderLabel: String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "ja_JP")
+        df.dateFormat = "yyyy年M月"
+        switch period {
+        case .thisMonth: return df.string(from: .now)
+        case .lastMonth:
+            let last = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
+            return df.string(from: last)
+        case .thisYear:
+            let yf = DateFormatter()
+            yf.locale = Locale(identifier: "ja_JP")
+            yf.dateFormat = "yyyy年"
+            return yf.string(from: .now)
+        case .all: return "全期間"
+        }
+    }
+
+    /// 期間に応じた支出キャプション
+    private var expenseCaption: String {
+        switch period {
+        case .thisMonth: "今月の支出"
+        case .lastMonth: "先月の支出"
+        case .thisYear:  "今年の支出"
+        case .all:       "全期間の支出"
+        }
+    }
+
+    private func mainExpense(_ expense: Decimal) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(CurrencyCatalog.format(expense, code: code))
+                .font(.system(size: 56, weight: .bold, design: .default).monospacedDigit())
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .contentTransition(.numericText(value: doubleValue(expense)))
+                .animation(.snappy, value: expense)
+            Text(expenseCaption)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 3 (or 2) 列のメトリクス。残予算は今月+予算設定時のみ。
+    private func metricsRow(income: Decimal, expense: Decimal, net: Decimal, budget: Decimal?, showRemaining: Bool) -> some View {
+        let remaining = (budget ?? 0) - expense
+        return HStack(alignment: .top, spacing: 12) {
+            metricColumn(
+                label: "収入",
+                value: CurrencyCatalog.format(income, code: code),
+                dotStyle: .filled(.green),
+                valueColor: .primary
+            )
+            if showRemaining {
+                metricColumn(
+                    label: "残予算",
+                    value: CurrencyCatalog.format(remaining, code: code),
+                    dotStyle: .filled(remaining < 0 ? .red : .primary),
+                    valueColor: remaining < 0 ? .red : .primary
+                )
+            }
+            metricColumn(
+                label: "収支",
+                value: (net >= 0 ? "+" : "") + CurrencyCatalog.format(net, code: code),
+                dotStyle: .outline,
+                valueColor: net > 0 ? .green : (net < 0 ? .red : .primary)
+            )
+        }
+    }
+
+    private enum DotStyle {
+        case filled(Color)
+        case outline
+    }
+
+    private func metricColumn(label: String, value: String, dotStyle: DotStyle, valueColor: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                metricDot(dotStyle)
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(value)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(valueColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func metricDot(_ style: DotStyle) -> some View {
+        switch style {
+        case .filled(let color):
+            Circle().fill(color).frame(width: 8, height: 8)
+        case .outline:
+            Circle().stroke(Color.secondary, lineWidth: 1).frame(width: 8, height: 8)
+        }
+    }
+
+    /// 新しい予算プログレスバー (左: 予算金額 / 右: %、下: capsule バー)
+    @ViewBuilder
+    private func cleanBudgetBar(spent: Decimal, budget: Decimal) -> some View {
+        let ratio = NSDecimalNumber(decimal: spent / budget).doubleValue
+        let clamped = max(0, min(1, ratio))
+        let isOver = spent > budget
+        let color: Color = isOver ? .red : (ratio >= 0.8 ? .orange : .primary)
+        VStack(spacing: 8) {
+            HStack {
+                Text("予算 \(CurrencyCatalog.format(budget, code: code))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((ratio * 100).rounded())) %")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.15))
+                    Capsule()
+                        .fill(color)
+                        .frame(width: geo.size.width * clamped)
+                }
+            }
+            .frame(height: 4)
+        }
     }
 
     /// `Decimal` をロール表示用 `Double` に。`Decimal` は直接 `numericText(value:)`
@@ -924,7 +1102,7 @@ private struct SummaryCard: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color(.tertiarySystemBackground))
+                        .fill(Color.platformTertiarySystemBackground)
                     Capsule()
                         .fill(color.gradient)
                         .frame(width: geo.size.width * clamped)
@@ -1046,7 +1224,7 @@ private struct ExpenseRowView: View {
                     size: 18
                 )
                 .overlay(
-                    Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                    Circle().stroke(Color.platformSystemBackground, lineWidth: 2)
                 )
                 .offset(x: 4, y: 4)
             }
@@ -1064,8 +1242,10 @@ private struct ExpenseRowView: View {
                     let rawName = expense.displayPaidBy
                     let displayName = (isSoloSheet && payerIsSelf) ? "" : rawName
                     if !displayName.isEmpty {
+                        // 支払者の name text にはアバター背景色を使わない (= secondary に統一)。
+                        // 背景色はアバター丸の塗りつぶしにだけ使うのが意図。
                         Text(displayName)
-                            .foregroundStyle(expense.payerTint)
+                            .foregroundStyle(.secondary)
                     }
                     if let note = expense.note, !note.isEmpty {
                         if !displayName.isEmpty { Text("·").foregroundStyle(.secondary) }

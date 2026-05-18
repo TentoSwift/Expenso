@@ -5,6 +5,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 struct EditTemplateView: View {
     enum Mode {
@@ -108,7 +109,11 @@ struct EditTemplateView: View {
                             Text("\(opt.symbol)  \(opt.code) — \(opt.displayName)").tag(opt.code)
                         }
                     }
+                    #if os(macOS)
+                    .pickerStyle(.menu)
+                    #else
                     .pickerStyle(.navigationLink)
+                    #endif
                 }
 
                 if let sheet = contextSheet {
@@ -188,7 +193,11 @@ struct EditTemplateView: View {
                     Button("キャンセル") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }.disabled(!canSave)
+                    #else
                     Button("保存") { save() }.disabled(!canSave)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }
@@ -260,8 +269,9 @@ struct EditTemplateView: View {
         tpl.kindRaw = kind.rawValue
         tpl.currencyCode = currencyCode
         tpl.categoryRaw = selectedCategory?.name
-        tpl.paidBy = selectedPayer?.name
-        tpl.payerProfileID = selectedPayer?.profileID
+        let share = contextSheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+        tpl.paidBy = nil
+        tpl.payerProfileID = selectedPayer?.resolvedProfileID(forShare: share)
         tpl.payerMemberID = selectedPayer?.id
         tpl.note = note
     }

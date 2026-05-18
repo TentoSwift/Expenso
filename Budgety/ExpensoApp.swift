@@ -17,14 +17,21 @@ struct ExpensoApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var shareToast: String?
     @State private var premiumExpiredAlertShown: Bool = false
-    /// シート参加直後にプロフィール未設定だった時、設定 UI を sheet で表示するフラグ。
-    @State private var showProfileSetupOnAccept: Bool = false
+    /// 初回起動時のみオンボーディングを出す。UserDefaults 永続化。
+    @AppStorage("hasShownOnboarding") private var hasShownOnboarding: Bool = false
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environment(\.locale, Locale(identifier: "ja_JP"))
+                .sheet(isPresented: Binding(
+                    get: { !hasShownOnboarding },
+                    set: { if !$0 { hasShownOnboarding = true } }
+                )) {
+                    OnboardingView { hasShownOnboarding = true }
+                        .interactiveDismissDisabled()
+                }
                 .overlay(alignment: .top) {
                     if let shareToast {
                         Text(shareToast)
@@ -41,12 +48,6 @@ struct ExpensoApp: App {
                     let title = (note.userInfo?["shareTitle"] as? String) ?? "シート"
                     showToast("「\(title)」に参加しました")
                     // 共有相手にあなたが誰か分かるよう、プロフィール未設定なら設定 UI を出す
-                    if UserProfileStore.shared.isEmpty {
-                        // toast の上に sheet が被らないよう少し遅らせる
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            showProfileSetupOnAccept = true
-                        }
-                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .expensoShareAcceptanceFailed)) { note in
                     let message = (note.userInfo?["message"] as? String) ?? "共有の受諾に失敗しました"
@@ -77,12 +78,37 @@ struct ExpensoApp: App {
                     #endif
                     await FXRatesService.shared.refreshIfStale()
                     await UserProfileStore.shared.ensureUserRecordNameLoaded()
+                    // Apple ID 名を取得して自分の displayName に反映 (初回は許可ダイアログ)
+                    await UserProfileStore.shared.refreshAppleIDName()
                     let ctx = persistenceController.container.viewContext
-                    // 別端末で先にプロフィールが設定されていれば、同期で来た ParticipantProfile から取り込む
-                    UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
-                    // 別端末で更新されたグローバルプロフィールを、override されていない
-                    // 既存シートの ParticipantProfile に伝搬する。
-                    UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)
+                    if BuildInfo.profileFeatureEnabled {
+                        UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
+                        UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)
+                    }
+                    // 過去の PP 逆引きで self Member.recordName に他人の ID が紛れた可能性を
+                    // ケアするための one-shot 正規化 (= canonical 経由で再判定)。
+                    UserProfileStore.shared.sanitizeSelfMemberRecordName(in: ctx)
+                    // 共有シートで `payerProfileID == 自分の旧 userRecordName` になっている
+                    // 行を canonical (email ベース等) に自動マイグレートする。
+                    UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
+                    // 別端末で編集された自分のプロフィールを Public DB から取り込む
+                    await UserProfileStore.shared.refreshOwnPublicProfile()
+                    // ローカルが空でなければ Public DB にも push (= sync 双方向の補完)
+                    if !UserProfileStore.shared.displayName.trimmingCharacters(in: .whitespaces).isEmpty {
+                        await PublicProfileSync.shared.uploadOwnProfile(
+                            urn: UserProfileStore.shared.userRecordName ?? "",
+                            displayName: UserProfileStore.shared.resolvedDisplayName,
+                            photoData: UserProfileStore.shared.photoData,
+                            colorHex: UserProfileStore.shared.avatarBgColorHex
+                        )
+                    }
+                    await prefetchAllParticipantProfiles(in: ctx)
+                    // CKShare の participant nameComponents を PP にハイドレートして
+                    // Apple ID 名がそのまま表示されるようにする (iCloud Extended Share Access)
+                    UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                    #if DEBUG
+                    diagnoseAllShares(in: ctx)
+                    #endif
                     // 定期項目の未生成 occurrence を Expense に展開
                     RecurringExpenseGenerator.generateAll(in: ctx)
                     // v0.x で UserDefaults に格納していたシートロック情報を Core Data 側へ移行
@@ -99,10 +125,12 @@ struct ExpensoApp: App {
                             await UserProfileStore.shared.ensureUserRecordNameLoaded()
                         }
                         UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
+                        // CKShare の participant 情報も再ハイドレート (新 PP が syc されてきた可能性)
+                        UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
+                        // 旧 canonical (email:...) → URN 移行も remote change で再実行
+                        // (CKShare メタデータが遅延ロードされた後に走らせる)
+                        UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
                     }
-                }
-                .sheet(isPresented: $showProfileSetupOnAccept) {
-                    UserProfileEditView()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
@@ -114,8 +142,12 @@ struct ExpensoApp: App {
                             if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
                                 await UserProfileStore.shared.ensureUserRecordNameLoaded()
                             }
-                            UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
-                            UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)
+                            // 同 Apple ID の他デバイスで編集された自分のプロフィールを取り込む
+                            await UserProfileStore.shared.refreshOwnPublicProfile()
+                            if BuildInfo.profileFeatureEnabled {
+                                UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
+                                UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)
+                            }
                         }
                     case .background:
                         // バックグラウンドに移る前に次回の BGAppRefreshTask を予約。
@@ -143,6 +175,43 @@ struct ExpensoApp: App {
         withAnimation { shareToast = message }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             withAnimation { shareToast = nil }
+        }
+    }
+
+    /// 全シートの ParticipantProfile.recordName (= 共有相手の URN を含む) を集めて
+    /// Public DB から fetch する。背景処理。
+    @MainActor
+    private func prefetchAllParticipantProfiles(in ctx: NSManagedObjectContext) async {
+        let req = NSFetchRequest<ParticipantProfile>(entityName: "ParticipantProfile")
+        let pps = (try? ctx.fetch(req)) ?? []
+        var urns: Set<String> = []
+        for pp in pps {
+            guard let rn = pp.recordName, !rn.isEmpty,
+                  rn != "_defaultOwner_", rn != "__defaultOwner__" else { continue }
+            // "email:..." 形式はまだ Phase 1 では Public DB キーに使えないので除外
+            // (Phase 2 で URN に統一する)
+            if rn.hasPrefix("email:") || rn.hasPrefix("phone:") { continue }
+            urns.insert(rn)
+        }
+        // 自分の URN も refresh しておく
+        if let own = UserProfileStore.shared.userRecordName, !own.isEmpty {
+            urns.insert(own)
+        }
+        if !urns.isEmpty {
+            await PublicProfileSync.shared.fetchProfiles(forURNs: Array(urns))
+        }
+    }
+
+    /// DEBUG: 全シートの CKShare 参加者から取得可能な identity 情報をログ出力。
+    /// `com.apple.developer.icloud-extended-share-access` エンタイトルメント追加後の
+    /// 挙動確認用 (Console.app の category=ShareDiagnostics でフィルタ可)。
+    @MainActor
+    private func diagnoseAllShares(in ctx: NSManagedObjectContext) {
+        let req = NSFetchRequest<ExpenseSheet>(entityName: "ExpenseSheet")
+        let sheets = (try? ctx.fetch(req)) ?? []
+        for s in sheets {
+            guard let share = ShareCoordinator.shared.existingShare(for: s) else { continue }
+            ShareParticipantDiagnostics.dump(share: share, context: s.displayName)
         }
     }
 }

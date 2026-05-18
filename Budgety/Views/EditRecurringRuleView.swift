@@ -5,6 +5,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 struct EditRecurringRuleView: View {
     enum Mode {
@@ -109,7 +110,11 @@ struct EditRecurringRuleView: View {
                             Text("\(opt.symbol)  \(opt.code) — \(opt.displayName)").tag(opt.code)
                         }
                     }
+                    #if os(macOS)
+                    .pickerStyle(.menu)
+                    #else
                     .pickerStyle(.navigationLink)
+                    #endif
                 }
 
                 Section {
@@ -222,8 +227,13 @@ struct EditRecurringRuleView: View {
                     Button("キャンセル") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(!canSave)
+                    #else
                     Button("保存") { save() }
                         .disabled(!canSave)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }
@@ -308,8 +318,9 @@ struct EditRecurringRuleView: View {
         rule.kindRaw = kind.rawValue
         rule.currencyCode = currencyCode
         rule.categoryRaw = selectedCategory?.name
-        rule.paidBy = selectedPayer?.name
-        rule.payerProfileID = selectedPayer?.profileID
+        let share = rule.sheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+        rule.paidBy = nil
+        rule.payerProfileID = selectedPayer?.resolvedProfileID(forShare: share)
         rule.note = note
         rule.frequency = frequency.rawValue
         rule.interval = Int32(interval)

@@ -23,11 +23,11 @@ struct SheetAIChatView: View {
             messageList
             inputBar
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(Color.platformSystemBackground.ignoresSafeArea())
         .navigationTitle("AI チャット")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     chat.resetConversation()
                 } label: {

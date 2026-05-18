@@ -6,6 +6,7 @@
 import Foundation
 import CoreData
 import SwiftUI
+import CloudKit
 
 extension ExpenseSheet {
     var displayName: String { name ?? "" }
@@ -96,16 +97,32 @@ extension ExpenseSheet {
     // MARK: - Members (精算機能用)
 
     /// シートに紐づく全メンバーの profileID リスト (= Expense.payerProfileID と同じ識別子空間)。
-    /// 自分 (UserProfileStore.userRecordName) と ParticipantProfile.recordName を結合して返す。
+    /// 自分 (canonicalSelfID = オーナーなら userRecordName、参加者なら "email:...")
+    /// と ParticipantProfile.recordName を結合して返す。
     /// 受益者未指定の Expense を「全員均等割り」として扱う際の母集合。
+    ///
+    /// 注意: 自分は **canonical** で入れる。`userRecordName` を使うと参加者側で
+    /// 自分の PP.recordName (= canonical = "email:...") と別文字列になり dedup
+    /// できず、フォールバック時に自分が 2 重カウントされて perShare がズレる。
     @MainActor
     func allMemberProfileIDs() -> [String] {
         var result: [String] = []
         var seen = Set<String>()
 
-        if let myRN = UserProfileStore.shared.userRecordName, !myRN.isEmpty,
-           seen.insert(myRN).inserted {
-            result.append(myRN)
+        #if !os(watchOS)
+        let share = ShareCoordinator.shared.existingShare(for: self)
+        #else
+        let share: CKShare? = nil
+        #endif
+        let selfID = UserProfileStore.shared.canonicalSelfID(forShare: share)
+            ?? UserProfileStore.shared.userRecordName
+        if let me = selfID, !me.isEmpty, seen.insert(me).inserted {
+            result.append(me)
+        }
+        // 旧 userRecordName が canonical と異なる場合も seen に入れて 2 重カウントを防ぐ
+        // (PP recordName がまだ旧 URN のままの相手がいた場合の保険)
+        if let urn = UserProfileStore.shared.userRecordName, !urn.isEmpty {
+            seen.insert(urn)
         }
 
         let profiles = (participantProfiles as? Set<ParticipantProfile>) ?? []
@@ -121,14 +138,33 @@ extension ExpenseSheet {
     }
 
     /// profileID を表示用情報に解決する。
-    /// 1. 自分 (UserProfileStore.userRecordName 一致)
-    /// 2. ParticipantProfile.recordName 一致 (= 共有相手のプロフィール)
-    /// 3. ローカル Member の recordName 一致
-    /// 4. ローカル Member の id (UUID) 一致 (旧データ救済)
+    /// 1. 自分 → UserProfileStore (カスタム設定が最優先)
+    /// 2. **Public DB の UserProfile (カスタムプロフィール)** ← 他人もここを最優先
+    /// 3. CKShare の participant.nameComponents (Apple ID 名)
+    /// 4. ParticipantProfile.recordName 一致 (CKShare 未取得時のフォールバック)
+    /// 5. ローカル Member の recordName / UUID 一致 (旧データ救済)
     /// いずれにも一致しなければ "メンバー" の汎用表示。
+    ///
+    /// カスタムプロフィール (Public DB) > Apple ID 名 > "メンバー" の優先順位。
+    /// 写真は Public DB のみ提供 (Apple ID アバターは API 非公開)。
     @MainActor
     func memberDisplayInfo(for profileID: String) -> (name: String, colorHex: String, photoData: Data?) {
-        if let myRN = UserProfileStore.shared.userRecordName, profileID == myRN {
+        // 自分判定: URN だけでなく canonical (email:..) や旧 ID も含めて広く拾う。
+        #if !os(watchOS)
+        let share = ShareCoordinator.shared.existingShare(for: self)
+        #else
+        let share: CKShare? = nil
+        #endif
+        let selfIDs = UserProfileStore.shared.canonicalSelfIDs(forShare: share)
+        let selfEmailID: String? = {
+            if let e = UserProfileStore.shared.selfEmail?.lowercased(), !e.isEmpty {
+                return "email:" + e
+            }
+            return nil
+        }()
+        let isSelf = selfIDs.contains(profileID)
+            || (selfEmailID != nil && profileID == selfEmailID)
+        if isSelf {
             let store = UserProfileStore.shared
             return (
                 name: store.resolvedDisplayName,
@@ -137,11 +173,34 @@ extension ExpenseSheet {
             )
         }
         let profiles = (participantProfiles as? Set<ParticipantProfile>) ?? []
-        if let pp = profiles.first(where: { $0.recordName == profileID }) {
+        let ppMatch = profiles.first(where: { $0.recordName == profileID })
+
+        // 2) Public DB のカスタムプロフィール (最優先で他人にも適用)
+        if let custom = PublicProfileSync.shared.profileOrPrefetch(for: profileID),
+           !custom.displayName.isEmpty {
+            let color = custom.colorHex
+                ?? (ppMatch?.colorHex?.isEmpty == false ? ppMatch!.colorHex! : "#8E8E93")
+            return (name: custom.displayName, colorHex: color, photoData: custom.photoData)
+        }
+
+        let fallbackColor = (ppMatch?.colorHex?.isEmpty == false ? ppMatch!.colorHex! : "#8E8E93")
+        let photoFromCache = PublicProfileSync.shared.cachedProfile(for: profileID)?.photoData
+
+        // 3) CKShare の Apple ID 名 (カスタム未設定時)
+        #if !os(watchOS)
+        if let share = share,
+           let liveName = nameFromShare(share, profileID: profileID),
+           !liveName.isEmpty {
+            return (name: liveName, colorHex: fallbackColor, photoData: photoFromCache)
+        }
+        #endif
+
+        // 4) PP フォールバック
+        if let pp = ppMatch {
             return (
                 name: pp.displayName?.isEmpty == false ? pp.displayName! : "メンバー",
-                colorHex: pp.colorHex?.isEmpty == false ? pp.colorHex! : "#8E8E93",
-                photoData: pp.photoData
+                colorHex: fallbackColor,
+                photoData: photoFromCache
             )
         }
         // ローカル Member へのフォールバック (recordName / UUID)
@@ -162,4 +221,30 @@ extension ExpenseSheet {
         }
         return (name: "メンバー", colorHex: "#8E8E93", photoData: nil)
     }
+
+    #if !os(watchOS)
+    /// `share` の owner / participants から `profileID` (URN) と一致するエントリを探し、
+    /// その `userIdentity.nameComponents` をフォーマットして返す。
+    /// `__defaultOwner__` placeholder の自分は別途 UserProfileStore で扱うので無視。
+    @MainActor
+    private func nameFromShare(_ share: CKShare, profileID: String) -> String? {
+        let fmt = PersonNameComponentsFormatter()
+        fmt.style = .default
+        // owner
+        let ownerRN = share.owner.userIdentity.userRecordID?.recordName ?? ""
+        if !UserProfileStore.isSelfPlaceholderRecordName(ownerRN), ownerRN == profileID,
+           let comps = share.owner.userIdentity.nameComponents {
+            return fmt.string(from: comps)
+        }
+        // participants
+        for p in share.participants {
+            let rn = p.userIdentity.userRecordID?.recordName ?? ""
+            if UserProfileStore.isSelfPlaceholderRecordName(rn) { continue }
+            if rn == profileID, let comps = p.userIdentity.nameComponents {
+                return fmt.string(from: comps)
+            }
+        }
+        return nil
+    }
+    #endif
 }

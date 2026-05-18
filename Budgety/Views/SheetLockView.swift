@@ -51,7 +51,7 @@ struct SheetLockView: View {
                 .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(Color.platformSecondarySystemBackground)
                 )
                 .padding(.horizontal, 16)
                 .offset(x: shake ? -6 : 0)
@@ -93,7 +93,7 @@ struct SheetLockView: View {
             Button("キャンセル") { onCancel() }
                 .padding(.bottom, 24)
         }
-        .background(Color(.systemBackground))
+        .background(Color.platformSystemBackground)
         .onAppear {
             focused = true
             // 起動時に自動で生体認証を試す

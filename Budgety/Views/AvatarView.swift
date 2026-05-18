@@ -7,7 +7,12 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct AvatarView: View {
     let photoData: Data?
@@ -35,11 +40,19 @@ struct AvatarView: View {
         return String(first).uppercased()
     }
 
-    private var tint: Color { Color(hex: colorHex) ?? .blue }
+    /// 背景色: 指定された colorHex が空/既定なら名前から決定的に生成。
+    /// "プロフィールは写真のみ" 方針 — ユーザーは色を選べず、名前から自動。
+    private var tint: Color {
+        let trimmed = colorHex.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed == "#8E8E93" {
+            return Color.deterministic(from: displayName)
+        }
+        return Color(hex: trimmed) ?? Color.deterministic(from: displayName)
+    }
 
     var body: some View {
-        if let data = photoData, let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
+        if let data = photoData, let image = makePlatformImage(from: data) {
+            image
                 .resizable()
                 .scaledToFill()
                 .frame(width: size, height: size)
@@ -54,6 +67,18 @@ struct AvatarView: View {
             }
             .frame(width: size, height: size)
         }
+    }
+
+    private func makePlatformImage(from data: Data) -> Image? {
+        #if canImport(UIKit)
+        guard let ui = UIImage(data: data) else { return nil }
+        return Image(uiImage: ui)
+        #elseif canImport(AppKit)
+        guard let ns = NSImage(data: data) else { return nil }
+        return Image(nsImage: ns)
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -83,27 +108,53 @@ extension AvatarView {
 /// Member を `@ObservedObject` で監視し、プロフィール更新 (photoData / colorHex / name) に
 /// 自動で追従するアバター。Member が無い (= shared store の Expense 等) ケースでは
 /// 受け取った fallback で `AvatarView` を描く。
+/// 自分 Member は UserProfileStore の写真も併用、他人の Member は recordName が
+/// URN ならば PublicProfileSync cache の写真も併用。
 struct ObservedMemberAvatar: View {
     @ObservedObject var member: Member
-    /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
-    var size: CGFloat = 40
-
-    var body: some View {
-        AvatarView(member: member, size: size)
-    }
-}
-
-/// `ParticipantProfile` を `@ObservedObject` で監視するアバター。
-/// Shared ストアでオーナー / 他参加者のプロフィールが更新された時に自動で再描画する。
-struct ObservedParticipantProfileAvatar: View {
-    @ObservedObject var profile: ParticipantProfile
+    @StateObject private var profile = UserProfileStore.shared
+    @StateObject private var pub = PublicProfileSync.shared
     /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
     var size: CGFloat = 40
 
     var body: some View {
         AvatarView(
-            photoData: profile.photoData,
-            displayName: profile.displayName ?? "",
+            photoData: resolvedPhoto,
+            displayName: member.displayName,
+            colorHex: member.displayColorHex,
+            size: size
+        )
+    }
+
+    private var resolvedPhoto: Data? {
+        if let p = member.photoData { return p }
+        if member.id == profile.selfMemberID { return profile.photoData }
+        if let rn = member.recordName, !rn.isEmpty {
+            return pub.profileOrPrefetch(for: rn)?.photoData
+        }
+        return nil
+    }
+}
+
+/// `ParticipantProfile` を `@ObservedObject` で監視するアバター。
+/// Shared ストアでオーナー / 他参加者のプロフィールが更新された時に自動で再描画する。
+/// PP 側に photoData が無くても PublicProfileSync cache (= Public DB から取得した
+/// 写真) があればそれを使う。
+struct ObservedParticipantProfileAvatar: View {
+    @ObservedObject var profile: ParticipantProfile
+    @StateObject private var pub = PublicProfileSync.shared
+    /// AvatarView 側で `@ScaledMetric` 制御するので、ここは plain CGFloat。
+    var size: CGFloat = 40
+
+    var body: some View {
+        let urn = profile.recordName ?? ""
+        let cached = pub.profileOrPrefetch(for: urn)
+        let photo = profile.photoData ?? cached?.photoData
+        let name = (cached?.displayName.isEmpty == false ? cached!.displayName
+                    : (profile.displayName ?? ""))
+        AvatarView(
+            photoData: photo,
+            displayName: name,
             colorHex: profile.colorHex ?? "#8E8E93",
             size: size
         )

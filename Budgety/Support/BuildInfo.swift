@@ -25,4 +25,9 @@ enum BuildInfo {
         return isTestFlight
         #endif
     }
+
+    /// プロフィール機能 (UserProfileStore / ParticipantProfile / ProfileEditView 等) を有効化するか。
+    /// PP は canonical ID (オーナーなら userRecordName、参加者なら "email:...") をキーに
+    /// 共有相手に表示名・写真・色を伝搬する。
+    static let profileFeatureEnabled: Bool = true
 }

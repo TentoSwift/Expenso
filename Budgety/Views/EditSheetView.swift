@@ -22,7 +22,6 @@ struct EditSheetView: View {
     @State private var budgetText: String = ""
     @State private var didLoad: Bool = false
     @State private var showDeleteConfirm: Bool = false
-    @State private var showProfileEditor: Bool = false
     @State private var showingPaywall: Bool = false
 
     /// このシート配下の自分の ParticipantProfile (= 「このシートでの自分」)
@@ -53,8 +52,6 @@ struct EditSheetView: View {
     var body: some View {
         NavigationStack {
             Form {
-                profileSection
-
                 Section {
                     HStack {
                         Spacer()
@@ -146,14 +143,16 @@ struct EditSheetView: View {
                     Button("キャンセル") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    #else
                     Button("保存") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }
-            .sheet(isPresented: $showProfileEditor) {
-                UserProfileEditView(sheet: record)
-            }
             .confirmationDialog(
                 record.isOwnedByCurrentUser
                     ? "「\(record.displayName)」を削除しますか?"
@@ -170,48 +169,6 @@ struct EditSheetView: View {
                      ? "このシートとすべての支出が削除されます。元には戻せません。"
                      : "あなたの端末からこのシートが消えます。オーナーや他の参加者のデータは残ります。")
             }
-        }
-    }
-
-    @ViewBuilder
-    private var profileSection: some View {
-        Section {
-            Button {
-                showProfileEditor = true
-            } label: {
-                HStack(spacing: 12) {
-                    if let pp = selfParticipantProfile {
-                        ObservedParticipantProfileAvatar(profile: pp, size: 44)
-                    } else {
-                        AvatarView(
-                            photoData: profile.photoData,
-                            displayName: profile.resolvedDisplayName,
-                            colorHex: profile.avatarBgColorHex ?? "#5B8DEF",
-                            size: 44
-                        )
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(selfParticipantProfile?.displayName?.isEmpty == false
-                             ? selfParticipantProfile!.displayName!
-                             : profile.resolvedDisplayName)
-                            .foregroundStyle(.primary)
-                            .fontWeight(.medium)
-                        Text("プロフィールを編集")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .buttonStyle(.plain)
-        } header: {
-            Text("このシートでの自分")
-        } footer: {
-            Text("このシート内の表示専用です。シートごとに別々の名前 / アバターを設定できます。")
-                .font(.caption2)
         }
     }
 
@@ -259,7 +216,7 @@ struct EditSheetView: View {
                         .frame(width: 46, height: 46)
                 }
                 Circle()
-                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .fill(isSelected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color.platformTertiarySystemBackground))
                     .frame(width: 38, height: 38)
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)
@@ -285,7 +242,11 @@ struct EditSheetView: View {
                 Text(opt.symbol + "  " + opt.code + " — " + opt.displayName).tag(opt.code)
             }
         }
+        #if os(macOS)
+        .pickerStyle(.menu)
+        #else
         .pickerStyle(.navigationLink)
+        #endif
     }
 
     private var deleteButtonTitle: String {

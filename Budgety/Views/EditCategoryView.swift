@@ -68,17 +68,27 @@ struct EditCategoryView: View {
                 }
                 .padding()
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .background(Color.platformSystemGroupedBackground.ignoresSafeArea())
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
+                    #if os(macOS)
+                    Button("キャンセル") { dismiss() }
+                    #else
                     circleToolbarButton(systemImage: "xmark") { dismiss() }
+                    #endif
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
+                    #if os(macOS)
+                    Button("完了") { save() }
+                        .disabled(!canSave)
+                        .keyboardShortcut(.return)
+                    #else
                     circleToolbarButton(systemImage: "checkmark") { save() }
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.4)
+                    #endif
                 }
             }
             .onAppear { loadIfNeeded() }
@@ -113,12 +123,12 @@ struct EditCategoryView: View {
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 14)
                 .padding(.horizontal, 16)
-                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color.platformTertiarySystemBackground, in: RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.platformSecondarySystemGroupedBackground, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var kindCard: some View {
@@ -146,7 +156,7 @@ struct EditCategoryView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.platformSecondarySystemGroupedBackground, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var colorCard: some View {
@@ -158,7 +168,7 @@ struct EditCategoryView: View {
             customColorPicker
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.platformSecondarySystemGroupedBackground, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func colorCircle(hex: String) -> some View {
@@ -219,7 +229,7 @@ struct EditCategoryView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.platformSecondarySystemGroupedBackground, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func iconButton(_ sym: String) -> some View {
@@ -246,7 +256,7 @@ struct EditCategoryView: View {
                         .frame(width: 50, height: 50)
                 }
                 Circle()
-                    .fill(isSelected ? AnyShapeStyle(previewColor.gradient) : AnyShapeStyle(Color(.tertiarySystemBackground)))
+                    .fill(isSelected ? AnyShapeStyle(previewColor.gradient) : AnyShapeStyle(Color.platformTertiarySystemBackground))
                     .frame(width: 40, height: 40)
                 Image(systemName: sym)
                     .foregroundStyle(isSelected ? .white : Color.primary)
@@ -274,7 +284,7 @@ struct EditCategoryView: View {
             Label("カテゴリを削除", systemImage: "trash")
                 .frame(maxWidth: .infinity)
                 .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                .background(Color.platformSecondarySystemGroupedBackground, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -286,7 +296,7 @@ struct EditCategoryView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 34, height: 34)
-                .background(Circle().fill(Color(.tertiarySystemBackground)))
+                .background(Circle().fill(Color.platformTertiarySystemBackground))
         }
     }
 

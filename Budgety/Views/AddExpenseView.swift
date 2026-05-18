@@ -6,6 +6,7 @@
 import SwiftUI
 import CoreData
 import PhotosUI
+import CloudKit
 
 struct AddExpenseView: View {
     enum Mode {
@@ -26,8 +27,24 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 現在のシートに対する CKShare (= 支払者の canonical ID 解決に使う)。
+    /// 非共有シートなら nil。
+    @MainActor
+    private var contextShare: CKShare? {
+        contextSheet.flatMap { ShareCoordinator.shared.existingShare(for: $0) }
+    }
+
+    /// 選択中の支払者の payerProfileID。シート文脈に応じた canonical を返す。
+    /// 自分なら canonical self ID (オーナーなら userRecordName、参加者なら "email:...")、
+    /// それ以外なら Member.recordName。
+    @MainActor
+    private var selectedPayerProfileID: String? {
+        selectedPayer?.resolvedProfileID(forShare: contextShare)
+    }
+
 
     @StateObject private var profile = UserProfileStore.shared
+    @StateObject private var pub = PublicProfileSync.shared
 
     @State private var title: String = ""
     @State private var amountText: String = ""
@@ -649,11 +666,17 @@ struct AddExpenseView: View {
 
     /// 自分の per-sheet ParticipantProfile (= シート単位 override 含む)。
     /// 「未選択」状態のデフォルト候補表示でグローバルではなく per-sheet 値を出すため。
+    /// canonical (このシート用) と旧 userRecordName 両方にマッチさせる。
     private var selfParticipantProfileInSheet: ParticipantProfile? {
-        guard let rn = profile.userRecordName, !rn.isEmpty,
-              let sheet = contextSheet,
+        guard let sheet = contextSheet,
               let profiles = sheet.participantProfiles as? Set<ParticipantProfile> else { return nil }
-        return profiles.first(where: { $0.recordName == rn })
+        var candidates: Set<String> = []
+        if let urn = profile.userRecordName, !urn.isEmpty { candidates.insert(urn) }
+        if let cid = profile.canonicalSelfID(forShare: contextShare), !cid.isEmpty { candidates.insert(cid) }
+        return profiles.first(where: {
+            guard let rn = $0.recordName, !rn.isEmpty else { return false }
+            return candidates.contains(rn)
+        })
     }
 
     /// シートに自分以外の参加者が居るか (= 共有中)。
@@ -703,6 +726,23 @@ struct AddExpenseView: View {
                 ObservedMemberAvatar(member: m, size: 24)
                 Text(m.displayName).foregroundStyle(.secondary)
             }
+        } else if case .edit(let expense) = mode,
+                  let pid = expense.payerProfileID, !pid.isEmpty {
+            // selectedPayer が解決失敗。編集対象 Expense の payerProfileID を canonical として
+            // 動的に名前/写真を引く (= PP / CKShare 参加者 / paidBy fallback)。
+            // 「未指定 = 自分」という思い込みで誤って自分を表示しない。
+            let name = expense.displayPaidBy.isEmpty ? "メンバー" : expense.displayPaidBy
+            AvatarView(
+                photoData: expense.payerPhotoData,
+                displayName: name,
+                colorHex: hexString(from: expense.payerTint) ?? "#8E8E93",
+                size: 24
+            )
+            Text(name).foregroundStyle(.secondary)
+        } else if case .edit = mode {
+            // 編集モードで真に未指定 (payerProfileID / paidBy / payerMemberID 全部空)
+            // の場合は「未選択」と表示する。自分にフォールバックしない。
+            unspecifiedPayerPreview
         } else if let name = payerFallbackName {
             if case .edit(let expense) = mode {
                 PayerAvatar(
@@ -730,6 +770,34 @@ struct AddExpenseView: View {
             )
             Text(profile.resolvedDisplayName).foregroundStyle(.secondary)
         }
+    }
+
+    /// 編集モードで payer が真に未指定の時の preview。
+    /// 「？マーク dashed circle」+ 「未選択」テキストを薄色で出す。
+    private var unspecifiedPayerPreview: some View {
+        Group {
+            ZStack {
+                Circle()
+                    .stroke(.tertiary, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .frame(width: 24, height: 24)
+                Image(systemName: "questionmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text("未選択").foregroundStyle(.secondary)
+        }
+    }
+
+    /// Color → "#RRGGBB" を簡易に取り出すヘルパー (取得できないなら nil)
+    private func hexString(from color: Color) -> String? {
+        #if canImport(UIKit)
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+        #else
+        return nil
+        #endif
     }
 
     private var sheetTint: Color {
@@ -1190,7 +1258,7 @@ struct AddExpenseView: View {
         if currencyCode != origCurrencyCode { return true }
         if note != origNote { return true }
         if !Calendar.current.isDate(date, inSameDayAs: origDate) { return true }
-        if (selectedPayer?.profileID ?? "") != origPayerProfileID { return true }
+        if (selectedPayerProfileID ?? "") != origPayerProfileID { return true }
         if selectedCategory?.objectID != origCategoryObjectID { return true }
         if selectedBeneficiaryCSV != origBeneficiaryCSV { return true }
         if (photoData?.count ?? 0) != origPhotoByteCount { return true }
@@ -1212,10 +1280,12 @@ struct AddExpenseView: View {
         if includeDate, !Calendar.current.isDate(date, inSameDayAs: origDate) {
             expense.date = date
         }
-        let newPayerProfileID = selectedPayer?.profileID ?? ""
+        let newPayerProfileID = selectedPayerProfileID ?? ""
         if newPayerProfileID != origPayerProfileID {
-            expense.payerProfileID = selectedPayer?.profileID
-            expense.paidBy = selectedPayer?.name
+            expense.payerProfileID = selectedPayerProfileID
+            // paidBy は denormalized キャッシュなので書かない。表示は payerProfileID +
+            // CKShare 参加者 / UserProfileStore から動的解決される。
+            expense.paidBy = nil
             expense.payerMemberID = selectedPayer?.id
         }
         if selectedCategory?.objectID != origCategoryObjectID {
@@ -1242,10 +1312,10 @@ struct AddExpenseView: View {
         if kind.rawValue != origKindRaw { rule.kindRaw = kind.rawValue }
         if currencyCode != origCurrencyCode { rule.currencyCode = currencyCode }
         if note != origNote { rule.note = note }
-        let newPayerProfileID = selectedPayer?.profileID ?? ""
+        let newPayerProfileID = selectedPayerProfileID ?? ""
         if newPayerProfileID != origPayerProfileID {
-            rule.payerProfileID = selectedPayer?.profileID
-            rule.paidBy = selectedPayer?.name
+            rule.payerProfileID = selectedPayerProfileID
+            rule.paidBy = nil
         }
         if selectedCategory?.objectID != origCategoryObjectID {
             rule.categoryRaw = selectedCategory?.name
@@ -1295,7 +1365,7 @@ struct AddExpenseView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(
-                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemBackground))
+                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.18) : Color.platformTertiarySystemBackground)
                 )
                 .foregroundStyle(isSelected ? Color.accentColor : .primary)
         }
@@ -1393,8 +1463,8 @@ struct AddExpenseView: View {
             expense.kindRaw = kind.rawValue
             expense.currencyCode = currencyCode
             expense.categoryRaw = selectedCategory?.name
-            expense.paidBy = selectedPayer?.name
-            expense.payerProfileID = selectedPayer?.profileID
+            expense.paidBy = nil
+            expense.payerProfileID = selectedPayerProfileID
             expense.payerMemberID = selectedPayer?.id
             expense.date = date
             expense.note = note
@@ -1409,7 +1479,9 @@ struct AddExpenseView: View {
                 expense.category = cat
             }
             // 自分の ParticipantProfile を同シートに ensure (まだ無ければ作成、あれば更新)
-            profile.ensureProfile(in: record, ctx: viewContext)
+            if BuildInfo.profileFeatureEnabled {
+                profile.ensureProfile(in: record, ctx: viewContext)
+            }
 
             // 繰り返し ON: Rule を作成して、この Expense を「最初の occurrence」として連結する。
             if isRecurring {
@@ -1508,8 +1580,8 @@ struct AddExpenseView: View {
         tpl.kindRaw = kind.rawValue
         tpl.currencyCode = currencyCode
         tpl.categoryRaw = selectedCategory?.name
-        tpl.paidBy = selectedPayer?.name
-        tpl.payerProfileID = selectedPayer?.profileID
+        tpl.paidBy = nil
+        tpl.payerProfileID = selectedPayerProfileID
         tpl.payerMemberID = selectedPayer?.id
         tpl.note = note
         tpl.beneficiaryProfileIDs = selectedBeneficiaryCSV
@@ -1539,8 +1611,8 @@ struct AddExpenseView: View {
         rule.kindRaw = kind.rawValue
         rule.currencyCode = currencyCode
         rule.categoryRaw = selectedCategory?.name
-        rule.paidBy = selectedPayer?.name
-        rule.payerProfileID = selectedPayer?.profileID
+        rule.paidBy = nil
+        rule.payerProfileID = selectedPayerProfileID
         rule.note = note
         rule.frequency = frequency.rawValue
         rule.interval = Int32(recurringInterval)

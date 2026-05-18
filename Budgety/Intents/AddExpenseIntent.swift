@@ -155,11 +155,12 @@ struct AddExpenseIntent: AppIntent {
             }
         }
 
-        // 支払者: 自分 (UserProfileStore のキャッシュから埋める)
+        // 支払者: 自分。共有シートの場合は canonical (= owner/userRecordName または email)
+        // を、非共有シートは userRecordName を payerProfileID として保存。paidBy は廃止。
         let profile = UserProfileStore.shared
-        if let rn = profile.userRecordName, !rn.isEmpty {
-            expense.payerProfileID = rn
-            expense.paidBy = profile.resolvedDisplayName
+        let share = ShareCoordinator.shared.existingShare(for: coreSheet)
+        if let pid = profile.canonicalSelfID(forShare: share), !pid.isEmpty {
+            expense.payerProfileID = pid
         }
         if let memberID = profile.selfMemberID {
             expense.payerMemberID = memberID
@@ -168,7 +169,7 @@ struct AddExpenseIntent: AppIntent {
         expense.sheet = coreSheet
 
         // 自分の ParticipantProfile をシートに ensure (まだ無ければ作成)
-        profile.ensureProfile(in: coreSheet, ctx: ctx)
+        if BuildInfo.profileFeatureEnabled { profile.ensureProfile(in: coreSheet, ctx: ctx) }
 
         pc.save()
 
