@@ -177,6 +177,30 @@ final class UserProfileStore: ObservableObject {
     /// セッション内 1 回までガード (= ダイアログ多重表示防止)
     private var didAttemptDiscoverability = false
 
+    /// 自分自身の Public DB プロフィール (= 別端末で編集したかもしれない値) を
+    /// ローカルキャッシュに引いてくる。同じ Apple ID の他デバイスとの同期に使う。
+    /// `profileUpdatedAt` よりも新しい場合のみ取り込む (LWW)。
+    func refreshOwnPublicProfile() async {
+        guard let urn = userRecordName, !urn.isEmpty else { return }
+        await PublicProfileSync.shared.fetchProfiles(forURNs: [urn])
+        guard let cached = PublicProfileSync.shared.cachedProfile(for: urn) else { return }
+        let localUpdated = profileUpdatedAt ?? .distantPast
+        // 別端末で新しく編集されていれば取り込む
+        guard cached.updatedAt > localUpdated else { return }
+        var changed = false
+        if displayName != cached.displayName {
+            displayName = cached.displayName
+            changed = true
+        }
+        if photoData != cached.photoData {
+            photoData = cached.photoData
+            changed = true
+        }
+        if changed {
+            profileUpdatedAt = cached.updatedAt
+        }
+    }
+
     /// 自分の Apple ID 名 (`CKUserIdentity.nameComponents`) を取得して必要なら
     /// `selfEmail` をキャッシュする。
     ///

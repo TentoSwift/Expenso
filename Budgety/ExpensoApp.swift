@@ -91,7 +91,9 @@ struct ExpensoApp: App {
                     // 共有シートで `payerProfileID == 自分の旧 userRecordName` になっている
                     // 行を canonical (email ベース等) に自動マイグレートする。
                     UserProfileStore.shared.migrateLegacyPayerProfileIDs(in: ctx)
-                    // Public DB の自分プロフィールを最新化 (displayName が空でなければ upload)
+                    // 別端末で編集された自分のプロフィールを Public DB から取り込む
+                    await UserProfileStore.shared.refreshOwnPublicProfile()
+                    // ローカルが空でなければ Public DB にも push (= sync 双方向の補完)
                     if !UserProfileStore.shared.displayName.trimmingCharacters(in: .whitespaces).isEmpty {
                         await PublicProfileSync.shared.uploadOwnProfile(
                             urn: UserProfileStore.shared.userRecordName ?? "",
@@ -140,6 +142,8 @@ struct ExpensoApp: App {
                             if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
                                 await UserProfileStore.shared.ensureUserRecordNameLoaded()
                             }
+                            // 同 Apple ID の他デバイスで編集された自分のプロフィールを取り込む
+                            await UserProfileStore.shared.refreshOwnPublicProfile()
                             if BuildInfo.profileFeatureEnabled {
                                 UserProfileStore.shared.hydrateFromParticipantProfile(in: ctx)
                                 UserProfileStore.shared.propagateProfileToAllSheets(in: ctx)

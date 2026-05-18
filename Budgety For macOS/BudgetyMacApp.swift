@@ -34,6 +34,8 @@ struct BudgetyMacApp: App {
                 .task {
                     await UserProfileStore.shared.ensureUserRecordNameLoaded()
                     await UserProfileStore.shared.refreshAppleIDName()
+                    // 同 Apple ID の他デバイスで編集された自分のプロフィールを取り込む
+                    await UserProfileStore.shared.refreshOwnPublicProfile()
                     let ctx = persistenceController.container.viewContext
                     UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
                     // CKShare がまだ非同期で取得中の可能性があるので、数秒後に再 hydrate
@@ -49,6 +51,7 @@ struct BudgetyMacApp: App {
                         if (UserProfileStore.shared.userRecordName ?? "").isEmpty {
                             await UserProfileStore.shared.ensureUserRecordNameLoaded()
                         }
+                        await UserProfileStore.shared.refreshOwnPublicProfile()
                         UserProfileStore.shared.hydrateParticipantProfilesFromShares(in: ctx)
                     }
                 }
