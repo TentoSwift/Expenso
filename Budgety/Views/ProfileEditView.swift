@@ -133,12 +133,15 @@ struct ProfileEditView: View {
         }
     }
 
-    @ViewBuilder
     private func platformImage(from data: Data) -> Image? {
         #if canImport(UIKit)
-        if let ui = UIImage(data: data) { Image(uiImage: ui) }
+        guard let ui = UIImage(data: data) else { return nil }
+        return Image(uiImage: ui)
         #elseif canImport(AppKit)
-        if let ns = NSImage(data: data) { Image(nsImage: ns) }
+        guard let ns = NSImage(data: data) else { return nil }
+        return Image(nsImage: ns)
+        #else
+        return nil
         #endif
     }
 
