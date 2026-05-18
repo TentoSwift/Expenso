@@ -13,6 +13,8 @@
 		2DACB2AC2FB9FEEC000917FB /* BudgetyIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 2DACB2AA2FB9FEEC000917FB /* BudgetyIcon.icon */; };
 		2DACB2AD2FB9FEEC000917FB /* BudgetyIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 2DACB2AA2FB9FEEC000917FB /* BudgetyIcon.icon */; };
 		A0010000A0010000A0010000 /* MemojiView in Frameworks */ = {isa = PBXBuildFile; productRef = A0030000A0030000A0030000 /* MemojiView */; };
+		4D8484612FADB766001AB1B7 /* CustomPicker in Frameworks */ = {isa = PBXBuildFile; productRef = 4D8484602FADB766001AB1B7 /* CustomPicker */; };
+		4D0030001A0030000A0030000 /* MemojiView in Frameworks */ = {isa = PBXBuildFile; productRef = 4D0030000A0030000A0030000 /* MemojiView */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +120,16 @@
 			membershipExceptions = (
 				Expenso.xcdatamodeld,
 				FXRatesService.swift,
+				Intents/AddExpenseIntent.swift,
+				Intents/ExpenseCategoryEntity.swift,
+				Intents/ExpenseSheetEntity.swift,
+				Intents/ExpensoShortcuts.swift,
+				Intents/GetExpensesIntent.swift,
+				Intents/QuickAddExpenseIntent.swift,
+				Intents/QuickBudgetIntent.swift,
+				Intents/QuickGetExpensesIntent.swift,
+				"Intents/QuickIntentLogic+Recurring.swift",
+				Intents/QuickIntentLogic.swift,
 				Models/CategorySeeds.swift,
 				"Models/Expense+Extensions.swift",
 				"Models/ExpenseCategory+Extensions.swift",
@@ -133,7 +145,9 @@
 				ShareCoordinator.swift,
 				Support/BuildInfo.swift,
 				"Support/Calendar+Month.swift",
+				Support/CategoryAISuggestor.swift,
 				"Support/Color+Hex.swift",
+				Support/CSVImporter.swift,
 				Support/Currency.swift,
 				Support/Haptics.swift,
 				Support/MarkdownHelper.swift,
@@ -141,30 +155,37 @@
 				Support/Notifications.swift,
 				Support/PublicProfileSync.swift,
 				Support/RecurringExpenseGenerator.swift,
+				Support/SampleDataGenerator.swift,
 				Support/SettlementCalculator.swift,
 				Support/ShareParticipantCanonical.swift,
 				Support/ShareParticipantDiagnostics.swift,
+				Support/SheetAIChat.swift,
+				Support/SheetExporter.swift,
 				Support/SheetLockManager.swift,
 				Support/StatsInsightsGenerator.swift,
 				"Support/View+PlatformShims.swift",
 				UserProfileStore.swift,
+				Views/AddSheetView.swift,
 				Views/AvatarView.swift,
 				Views/BeneficiaryPickerView.swift,
 				Views/CategoryIconView.swift,
 				Views/CategoryListView.swift,
 				Views/CategoryPickerView.swift,
+				Views/CSVImportView.swift,
 				Views/EditCategoryView.swift,
 				Views/EditRecurringRuleView.swift,
-				Views/PaywallView.swift,
 				Views/EditSheetView.swift,
 				Views/EditTemplateView.swift,
 				Views/iCloudStatusBanner.swift,
 				Views/MemberPickerView.swift,
+				Views/OnboardingView.swift,
+				Views/PaywallView.swift,
 				Views/RecurringListView.swift,
 				Views/RecurringSettingsView.swift,
 				Views/SetSheetPasswordView.swift,
 				Views/SettlementView.swift,
 				Views/ShareStatusBadge.swift,
+				Views/SheetAIChatView.swift,
 				Views/SheetIconView.swift,
 				Views/SheetLockView.swift,
 				Views/StatsView.swift,
@@ -245,6 +266,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4D8484612FADB766001AB1B7 /* CustomPicker in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -364,6 +386,7 @@
 			);
 			name = "Budgety For macOS";
 			packageProductDependencies = (
+				4D8484602FADB766001AB1B7 /* CustomPicker */,
 			);
 			productName = "Budgety For macOS";
 			productReference = 4D18B4C22FB31605006F2C30 /* Budgety For macOS.app */;
@@ -695,7 +718,7 @@
 				CODE_SIGN_ENTITLEMENTS = Budgety/Expenso.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026051502;
+				CURRENT_PROJECT_VERSION = 2026051801;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -741,7 +764,7 @@
 				CODE_SIGN_ENTITLEMENTS = Budgety/Expenso.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026051502;
+				CURRENT_PROJECT_VERSION = 2026051801;
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -871,7 +894,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Budgety For macOS/Budgety For macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026051502;
+				CURRENT_PROJECT_VERSION = 2026051801;
 				DEVELOPMENT_ASSET_PATHS = "\"Budgety For macOS/Preview Content\"";
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -910,7 +933,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Budgety For macOS/Budgety For macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026051502;
+				CURRENT_PROJECT_VERSION = 2026051801;
 				DEVELOPMENT_ASSET_PATHS = "\"Budgety For macOS/Preview Content\"";
 				DEVELOPMENT_TEAM = LV3H7Q68W6;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1016,6 +1039,16 @@
 			productName = CustomPicker;
 		};
 		A0030000A0030000A0030000 /* MemojiView */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0020000A0020000A0020000 /* XCRemoteSwiftPackageReference "MemojiView" */;
+			productName = MemojiView;
+		};
+		4D8484602FADB766001AB1B7 /* CustomPicker */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2D84845E2FADB766001AB1B6 /* XCRemoteSwiftPackageReference "CustomPicker" */;
+			productName = CustomPicker;
+		};
+		4D0030000A0030000A0030000 /* MemojiView */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A0020000A0020000A0020000 /* XCRemoteSwiftPackageReference "MemojiView" */;
 			productName = MemojiView;

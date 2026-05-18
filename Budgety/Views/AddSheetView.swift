@@ -115,7 +115,11 @@ struct AddSheetView: View {
                 Text(opt.symbol + "  " + opt.code + " — " + opt.displayName).tag(opt.code)
             }
         }
+        #if os(macOS)
+        .pickerStyle(.menu)
+        #else
         .pickerStyle(.navigationLink)
+        #endif
     }
 
     private var sheetIconGrid: some View {

@@ -10,7 +10,12 @@
 
 import AppIntents
 import CoreData
+#if canImport(UIKit)
 import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 import SwiftUI
 
 struct ExpenseCategoryEntity: AppEntity {
@@ -115,6 +120,7 @@ extension ExpenseCategoryEntity {
         )
     }
 
+    #if canImport(UIKit)
     /// CategoryIconView と同じ見た目 (= カテゴリ色のグラデ円 + 白の SF Symbol) を
     /// PNG Data として返す。
     @MainActor
@@ -216,8 +222,16 @@ extension ExpenseCategoryEntity {
     private static func renderBadge(symbol: String, colorHex: String, size: CGFloat = 96) -> Data? {
         renderBadgeImage(symbol: symbol, colorHex: colorHex, size: size)?.pngData()
     }
+    #else
+    /// macOS フォールバック: Shortcuts UI が iOS とは異なるため nil で OK。
+    @MainActor
+    static func renderAISuggestionSymbol(_ name: String, colorHex: String) -> Data? { nil }
+    @MainActor
+    static func renderColoredSymbol(_ name: String, colorHex: String) -> Data? { nil }
+    #endif
 }
 
+#if canImport(UIKit)
 private extension UIColor {
     /// HSB の brightness に `delta` を加算した新しい色を返す。
     /// `delta` は -1.0…1.0、ガード付き。
@@ -228,3 +242,4 @@ private extension UIColor {
         return UIColor(hue: h, saturation: s, brightness: nb, alpha: a)
     }
 }
+#endif

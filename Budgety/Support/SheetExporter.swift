@@ -11,7 +11,12 @@
 import Foundation
 import CoreData
 import PDFKit
+#if canImport(UIKit)
 import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 enum SheetExporter {
     // MARK: - CSV
@@ -78,8 +83,9 @@ enum SheetExporter {
         }
     }
 
-    // MARK: - PDF
+    // MARK: - PDF (iOS only)
 
+    #if canImport(UIKit)
     /// シートの月別サマリレポート PDF を生成。
     /// - 1 ページ目: 表紙 (シート名 / 期間 / 総合計)
     /// - 以降: 月ごとに 支出/収入 合計 + カテゴリ別内訳
@@ -238,4 +244,5 @@ enum SheetExporter {
             path.stroke()
         }
     }
+    #endif
 }

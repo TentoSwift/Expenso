@@ -27,7 +27,7 @@ struct SheetAIChatView: View {
         .navigationTitle("AI チャット")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     chat.resetConversation()
                 } label: {

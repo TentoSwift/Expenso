@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:1.00000,0.96492,0.61073,1.00000",
-      "display-p3:0.96783,0.52200,0.35051,1.00000"
+      "display-p3:1.00000,0.62942,0.86815,1.00000",
+      "display-p3:0.82936,0.23312,0.96783,1.00000"
     ],
     "orientation" : {
       "start" : {
@@ -18,26 +18,7 @@
   "groups" : [
     {
       "layers" : [
-        {
-          "fill" : {
-            "solid" : "display-p3:0.96783,0.59976,0.47278,0.00000"
-          },
-          "image-name" : "circle.svg",
-          "name" : "circle",
-          "opacity" : 1,
-          "position-specializations" : [
-            {
-              "idiom" : "square",
-              "value" : {
-                "scale" : 11,
-                "translation-in-points" : [
-                  0,
-                  0
-                ]
-              }
-            }
-          ]
-        }
+
       ],
       "shadow" : {
         "kind" : "neutral",

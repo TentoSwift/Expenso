@@ -22,6 +22,9 @@ struct BudgetyMacSheetView: View {
     @State private var showingRecurring = false
     @State private var showingTemplates = false
     @State private var showingEditSheet = false
+    @State private var showingAIChat = false
+    @State private var showingCSVImport = false
+    @State private var showingStats = false
 
     private var allExpenses: [Expense] {
         ((sheet.expenses as? Set<Expense>) ?? [])
@@ -75,6 +78,13 @@ struct BudgetyMacSheetView: View {
                     Button { showingSettlement = true } label: {
                         Label("精算", systemImage: "yensign.circle")
                     }
+                    Button { showingStats = true } label: {
+                        Label("統計", systemImage: "chart.bar.xaxis")
+                    }
+                    Button { showingAIChat = true } label: {
+                        Label("AI チャット", systemImage: "sparkles")
+                    }
+                    Divider()
                     Button { showingCategories = true } label: {
                         Label("カテゴリ管理", systemImage: "square.grid.2x2")
                     }
@@ -85,6 +95,9 @@ struct BudgetyMacSheetView: View {
                         Label("テンプレート", systemImage: "doc.on.doc")
                     }
                     Divider()
+                    Button { showingCSVImport = true } label: {
+                        Label("CSV インポート", systemImage: "tray.and.arrow.down")
+                    }
                     Button { showingEditSheet = true } label: {
                         Label("シートを編集", systemImage: "pencil")
                     }
@@ -116,6 +129,15 @@ struct BudgetyMacSheetView: View {
             // EditSheetView 自身が cancel/save の toolbar を持つので wrapper 不要
             NavigationStack { EditSheetView(record: sheet) }
                 .frame(minWidth: 600, minHeight: 600)
+        }
+        .sheet(isPresented: $showingAIChat) {
+            MacModalSheet { SheetAIChatView(record: sheet) }
+        }
+        .sheet(isPresented: $showingCSVImport) {
+            MacModalSheet { CSVImportView(sheet: sheet) }
+        }
+        .sheet(isPresented: $showingStats) {
+            MacModalSheet { StatsView(record: sheet) }
         }
     }
 
