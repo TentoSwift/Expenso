@@ -118,15 +118,25 @@ enum SettlementCalculator {
         // ── email/旧URN → URN マッピングを CKShare から構築 ──
         // share.participants[i].userIdentity から (URN, email) のペアを取って
         // 旧 "email:foo@bar.com" 形式 ID から正しい URN を逆引きできるようにする。
+        // self placeholder (__defaultOwner__) のエントリも、その email を
+        // selfCanonical に紐づけて map に入れる (= 自分の旧 email-based payerProfileID
+        // を正しく URN 解決できるようにする)。
         var emailToURN: [String: String] = [:]
         if let share = share {
             for p in share.participants {
-                guard let urn = p.userIdentity.userRecordID?.recordName,
-                      !urn.isEmpty,
-                      !UserProfileStore.isSelfPlaceholderRecordName(urn) else { continue }
+                let urnRaw = p.userIdentity.userRecordID?.recordName ?? ""
+                let resolvedURN: String
+                if UserProfileStore.isSelfPlaceholderRecordName(urnRaw) {
+                    // self placeholder → 自分の URN に置き換え
+                    guard !selfCanonical.isEmpty else { continue }
+                    resolvedURN = selfCanonical
+                } else {
+                    guard !urnRaw.isEmpty else { continue }
+                    resolvedURN = urnRaw
+                }
                 if let email = p.userIdentity.lookupInfo?.emailAddress?.lowercased(),
                    !email.isEmpty {
-                    emailToURN["email:" + email] = urn
+                    emailToURN["email:" + email] = resolvedURN
                 }
             }
         }

@@ -358,16 +358,22 @@ final class UserProfileStore: ObservableObject {
             if let share = ShareCoordinator.shared.existingShare(for: s) {
                 var emailToURN: [String: String] = [:]
                 for p in share.participants {
-                    let urn = p.userIdentity.userRecordID?.recordName ?? ""
-                    guard !urn.isEmpty,
-                          !Self.isSelfPlaceholderRecordName(urn) else { continue }
+                    let urnRaw = p.userIdentity.userRecordID?.recordName ?? ""
+                    let resolvedURN: String
+                    if Self.isSelfPlaceholderRecordName(urnRaw) {
+                        // self placeholder → 自分の URN に置き換え
+                        guard let myURN = userRecordName, !myURN.isEmpty else { continue }
+                        resolvedURN = myURN
+                    } else {
+                        guard !urnRaw.isEmpty else { continue }
+                        resolvedURN = urnRaw
+                    }
                     if let email = p.userIdentity.lookupInfo?.emailAddress?.lowercased(),
                        !email.isEmpty {
-                        emailToURN["email:" + email] = urn
+                        emailToURN["email:" + email] = resolvedURN
                     }
                 }
-                // 自分の email も追加 (CKShare では __defaultOwner__ で email が取れないため
-                // 別途 UserProfileStore.selfEmail からキャッシュ値を使う)
+                // selfEmail キャッシュからもフォールバック (userDiscoverability 経由)
                 if let myEmail = selfEmail?.lowercased(), !myEmail.isEmpty,
                    let myURN = userRecordName, !myURN.isEmpty {
                     emailToURN["email:" + myEmail] = myURN
